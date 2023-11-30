@@ -5,8 +5,8 @@
 #include "Adafruit_MAX31856.h"  // thermocouple card library (56)
 #include <PID_v1.h>             // PID temp control library
 #include <SPI.h>                // Serial Peripheral Interface library
-#include <SD.h>                 // SD memory card library (SPI is required)
-#include <FS.h>                 // So that ESP32 recognizes SD card
+#include <FS.h>                 // File system
+#include <SPIFFS.h>             // For SPI full file system
 #include <WiFiMulti.h>          // Enables conection to multiple WiFi networks
 #include <InfluxDbClient.h>     // Write data to Influx Data Base
 #include <InfluxDbCloud.h>      // Enable Influx Data Cloud storage
@@ -123,15 +123,21 @@ void setup() {
   // attachInterrupt(digitalPinToInterrupt(limitSwitchPin), checkDoorISR, CHANGE);
 
   // Setup thermocouple
-  thermocouple.begin();
+  bool TCbegan = thermocouple.begin();
+  Serial.println(TCbegan);
+  while (!TCbegan) {
+    TCbegan = thermocouple.begin();
+    displayErrorMessage("TC ERROR","Could not initialize thermocouple.", "Check connections");
+    delay(200);
+  }
   thermocouple.setThermocoupleType(TCTYPE);  // thermocouple.getThermocoupleType
 
   tft.init();
   tft.setRotation(3);
 
-  // Setup SD card
-  while (!SD.begin()) {
-    displayErrorMessage("SD Card Error", "Can't setup SD card.", "Make sure card is in.");
+  // Mount SPIFFS file system
+  while (!SPIFFS.begin(true)) {
+    displayErrorMessage("SPIFFS Error", "Can't setup file system.", "Make sure files are uploaded.");
     if (digitalRead(rstPin) == LOW) esp_restart();
     delay(200);
   }
@@ -829,7 +835,7 @@ void openProgram() {
 
   // Make sure you can open the file
   sprintf(tempLine, "/%d.txt", programNumber);
-  File myFile = SD.open(tempLine, FILE_READ);
+  fs::File myFile = SPIFFS.open(tempLine, FILE_READ);
 
   if (myFile == false) {
     tft.setCursor(20, 40);

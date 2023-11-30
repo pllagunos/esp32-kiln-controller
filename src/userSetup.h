@@ -20,8 +20,8 @@ const char* network1 = "networkSSID";  //"networkSSID";
 const char* pwd1 = "password";        //"password";
 const char* network2 = "networkSSID";
 const char* pwd2 = "password";
-const char* network3 = "etwas";
-const char* pwd3 = "eigenschaft";
+const char* network3 = "networkSSID";
+const char* pwd3 = "password";
 //* fill the network arrays */
 const char* network[] = {network1, network2, network3};
 const char* password[] = {pwd1, pwd2, pwd3};
