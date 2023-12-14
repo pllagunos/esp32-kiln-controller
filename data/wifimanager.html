@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>WiFi Manager</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+
+<body>
+  <div class="topnav">
+    <h1>ESP Wi-Fi Manager</h1>
+  </div>
+  <div class="content">
+    <div class="card-grid">
+      <div class="card">
+        <form id="wifiManagerForm" onsubmit="sendWifiManagerForm(); return false;">
+          <br>
+          SSID:
+          <select name="ssid">
+            <option id="SSID1" value="%SSID1%">%SSID1%</option>
+            <option id="SSID2" value="%SSID2%">%SSID2%</option>
+            <option id="SSID3" value="%SSID3%">%SSID3%</option>
+            <option id="SSID4" value="%SSID4%">%SSID4%</option>
+            <option id="SSID5" value="%SSID5%">%SSID5%</option>
+          </select>
+          <br>
+          Password: <input type="text" name="password">
+          <input type="submit" value="Submit">
+        </form>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+
+</html>

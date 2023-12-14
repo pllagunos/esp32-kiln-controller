@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Firing Schedule</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <style>
+        input[type=text],
+        input[type=number],
+        select {
+            width: 100%;
+            /* Use 100% width for inputs to fill their containers */
+            padding: 8px;
+            margin: 0;
+            display: inline-block;
+            /* Change to inline-block for better control */
+            border: 1px solid #ccc;
+            /* Add a border for visibility */
+            border-radius: 2px;
+            box-sizing: border-box;
+            /* Include padding and borders in the width */
+        }
+
+        ol {
+            padding: 0;
+            margin: 0;
+            list-style-type: decimal;
+        }
+
+        li {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            justify-content: flex-start;
+            /* Align to the start of the flex container */
+        }
+
+        li div {
+            display: flex;
+            flex-direction: column;
+            flex-basis: calc(33.3% - 10px);
+            /* Assign width to each flex item */
+            max-width: calc(33.3% - 10px);
+            /* Add max-width for flex items */
+        }
+
+        li span,
+        li div {
+            flex: 1;
+        }
+
+        .button-main {
+            width: 150px;
+            font-size: 0.9em;
+        }
+
+        .program-description {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            /* 2 columns on desktop */
+            gap: 10px;
+            /* space between grid items */
+            margin-bottom: 10px;
+            /* space below the grid */
+        }
+
+        /* Media query for mobile screens */
+        @media (max-width: 600px) {
+            li {
+                justify-content: flex-start;
+            }
+
+            li div {
+                margin-left: 10px;
+                /* Add left margin to div elements */
+            }
+
+            .button-main {
+                width: auto;
+                /* Allow button to adjust size on smaller screens */
+                flex-grow: 1;
+            }
+
+            .program-description {
+                grid-template-columns: 1fr;
+                /* 1 column on mobile */
+            }
+        }
+    </style>
+</head>
+
+<body class="firingProgram">
+    <div class="topnav">
+        <h1>Firing Schedule</h1>
+    </div>
+    <br>
+    <form id="firingProgramForm" onsubmit="sendFiringProgram(); return false;">
+        <div class="program-description">
+            <div>
+                <input type="number" name="programNumber" placeholder="Program Number">
+                <input type="text" name="createdDate" placeholder="Created Date">
+            </div>
+            <div>
+                <input type="text" name="name" placeholder="Name">
+                <input type="text" name="duration" placeholder="Duration">
+            </div>
+        </div>
+
+        <br>
+        <ol id="segments">
+            <!-- Initial segment -->
+            <li>
+                <div class="counter">
+                    <span>1. </span>
+                </div>
+                <div>
+                    <label for="target1">Target (°C):</label>
+                    <input type="number" name="target1" id="target1">
+                </div>
+                <div>
+                    <label for="speed1">Speed (°C/hr):</label>
+                    <input type="number" name="speed1" id="speed1">
+                </div>
+                <div>
+                    <label for="hold1">Hold (min):</label>
+                    <input type="number" name="hold1" id="hold1">
+                </div>
+                <!-- Button to remove this segment -->
+                <button class="button-main" onclick="removeSegment(this)">Remove</button>
+            </li>
+        </ol>
+
+        <br><br>
+
+        <!-- Button to add a new segment -->
+        <button class="button-segment" onclick="addSegment(event)">Add Segment</button>
+
+        <br><br>
+
+        <input type="submit" value="Submit">
+    </form>
+    <script src="script.js"></script>
+</body>
+
+</html>

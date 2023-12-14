@@ -11,13 +11,17 @@
 #include <InfluxDbClient.h>     // Write data to Influx Data Base
 #include <InfluxDbCloud.h>      // Enable Influx Data Cloud storage
 #include <Preferences.h>        // library to save variables to EPROOM
+#include <ESPAsyncWebServer.h>
+#include <AsyncTCP.h>
+#include <DNSServer.h>
+#include <set>
+#include <ArduinoJson.h>
 
 //****************************
 // VARIABLES
 //****************************
 
 // Setup user variables (CHANGE THESE IN HEADER FILE)
-// #include "../src/userSetup.h"
 #include "userSetup.h"
 
 // Internal variables
@@ -29,6 +33,7 @@ unsigned long programStart;  // Exact time you started running the program (ms).
 unsigned long heatStart;     // Exact time you started the new heating cycle (ms).  Based on millis().
 unsigned long rampStart;     // Exact time the ramp phase of the segment started (ms).  Based on millis().
 unsigned long holdStart;     // Exact time the hold phase of the segment started (ms).  Based on millis().
+unsigned long lastSSIDUpdate;
 double pidInput;             // Input for PID loop (actual temp reading from thermocouple).  Don't change.
 double pidInput_global;      // "" but for both tasks
 double pidOutput;            // Output for PID loop (relay for heater).  Don't change.
@@ -53,11 +58,12 @@ int programNumber;           // Current firing program number.  This ties to the
 int screenNum = 1;           // Screen number displayed during firing (1 = temps / 2 = program info / 3 = tools / 4 = done
 int segNum = 0;              // Current segment number running in firing program.  0 means a program hasn't been selected yet.
 int segNum_global = 0;       // "" but for both tasks
-int segHold[20];             // Hold time for each segment (min).  This starts after it reaches target temp.
-int segRamp[20];             // Rate of temp change for each segment (deg/hr).
-int segTemp[20];             // Target temp for each segment (degrees).
+int segHold[MAX_SEGMENTS];   // Hold time for each segment (min).  This starts after it reaches target temp.
+int segRamp[MAX_SEGMENTS];   // Rate of temp change for each segment (deg/hr).
+int segTemp[MAX_SEGMENTS];   // Target temp for each segment (degrees).
 int action;                  // Action methods
 int actionSel = 1;           // Option selected from action screen
+int configSel = 1;
 bool programOK = false;      // Is the program you loaded OK?
 bool isOnHold = 0;           // Current segment phase.  0 = ramp.  1 = hold.
 bool doorClosed = true;      // Kiln door has a limit switch attached to it.
@@ -67,20 +73,59 @@ bool selectPressed = false;  // Select button press state
 bool downPressed = false;    // Down button press state
 bool influx_OK = false;      // Is InfluxDB publishing working
 bool connection_OK = false;  // Is WiFi connection working
+bool captive_mode = false;
+bool receivedCredentials = false;
+const char* ssidPath = "/ssid.txt";
+const char* passPath = "/pass.txt";
+
+struct FiringSegment {
+  int targetTemperature;
+  int firingRate;
+  int holdingTime;
+};
+
+struct FiringProgram {
+  int programNumber;
+  String name;
+  String duration;
+  String createdDate;
+  FiringSegment segments[MAX_SEGMENTS];
+  int segmentQuantity;
+};
+
+FiringProgram currentProgram;
+String ssidList;
+String ssid;
+String password;
 
 //******************************************************************************************************************************
 //  SETUP: INITIAL SETUP (RUNS ONCE DURING START)
 //******************************************************************************************************************************
 /* Initialize stuff */
 WiFiMulti wifiMulti;
+AsyncWebServer server(80);
+DNSServer dnsServer;
 TFT_eSPI tft = TFT_eSPI();
 PID pidCont = { PID(&pidInput, &pidOutput, &pidSetPoint, Kp, Ki, Kd, DIRECT) };
 Preferences preferences;
-// Adafruit_MAX31856 thermocouple(thermocoupleCS);
 Adafruit_MAX31856 thermocouple(thermocoupleCS, MAX_DI, MAX_DO, MAX_CLK);
 InfluxDBClient client(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 Point sensor("HORNO ELECTRICO");
 SemaphoreHandle_t DataSemaphore;
+
+class CaptiveRequestHandler : public AsyncWebHandler {
+public:
+  CaptiveRequestHandler() {}
+  virtual ~CaptiveRequestHandler() {}
+
+  bool canHandle(AsyncWebServerRequest *request) {
+    return true;
+  }
+
+  void handleRequest(AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/index.html","text/html"); 
+  }
+};
 
 // put function declarations here:
 void publishing_task(void*parameter);
@@ -96,6 +141,7 @@ void runningScreen();
 void settingsScreen(int sel);
 void introScreen(int sel);
 void actionScreen(int actionSel);
+void configScreen(int configSel);
 void openProgram();
 void displayErrorMessage(char* title, char* message1, char* message2);
 void initWiFi();
@@ -106,6 +152,13 @@ void readButtons();
 void btnBounce(int btnPin);
 void tftPrintCenterWidth(char* text, int y);
 void tftPrint(char* text, int x, int y);
+String readFile(fs::FS& fs, const char* path);
+void writeFile(fs::FS& fs, const char* path, const char* message);
+void StartCaptivePortal();
+void setupServer();
+void getSSIDs();
+void saveConfigFile();
+int extractSegmentNumber(const String& paramName);
 
 void setup() {
   // Start the serial communication
@@ -119,6 +172,7 @@ void setup() {
   pinMode(rstPin, INPUT_PULLUP);
   pinMode(heaterPin, OUTPUT);
   pinMode(limitSwitchPin, INPUT_PULLUP);
+  pinMode(ledPin, OUTPUT);
   // doorClosed = !digitalRead(limitSwitchPin);  // door is closed when pin is LOW
   // attachInterrupt(digitalPinToInterrupt(limitSwitchPin), checkDoorISR, CHANGE);
 
@@ -145,8 +199,12 @@ void setup() {
   tft.fillScreen(TFT_BLACK);
 
   // Initialize WiFi
+  ssid = readFile(SPIFFS, ssidPath);
+  password = readFile(SPIFFS, passPath);
+  Serial.println(ssid);
+  Serial.println(password);
   initWiFi();
-  if (WiFi.status() == WL_CONNECTED) timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
+  // if (WiFi.status() == WL_CONNECTED) timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
 
   // setup and retrieve data from EEPROM
   preferences.begin("my-app", false);
@@ -169,11 +227,31 @@ void loop() {
 // Task function to publish data on core 0 *** ADD ALL WIFI CONNETING TASKS HERE TOO **
 void publishing_task(void* parameter) {
   while (1) {
+    // Check if ESP is not in AP mode
+    xSemaphoreTake(DataSemaphore, portMAX_DELAY);
+    bool captive = captive_mode;
+    if (captive) connection_OK = false;
+    xSemaphoreGive(DataSemaphore);
+
     // Check WiFi connection
+    if (captive) {
+      Serial.println("not publishing, captive mode ON");
+      delay(5000);
+      continue;
+    }
+
+    // if (credentialsChanged) {
+    //   Serial.println("Credentials changed. Initializing WiFi again.");
+    //   credentialsChanged = false;
+    //   initWiFi();
+    //   continue;
+    // }
+
     bool connected = (wifiMulti.run() == WL_CONNECTED);
 
     xSemaphoreTake(DataSemaphore, portMAX_DELAY);
     connection_OK = connected;
+    // receivedCredentials = credentialsChanged;
     xSemaphoreGive(DataSemaphore);
 
     if (connected) {
@@ -190,8 +268,8 @@ void publishing_task(void* parameter) {
       // Write data
       bool published = (client.writePoint(sensor));
       if (!published) {
-        // Serial.print("InfluxDB write failed: ");
-        // Serial.println(client.getLastErrorMessage());
+        Serial.print("InfluxDB write failed: ");
+        Serial.println(client.getLastErrorMessage());
       }
 
       xSemaphoreTake(DataSemaphore, portMAX_DELAY);
@@ -322,7 +400,7 @@ void main_task(void* parameter) {
     if (strstr(screen, "settings") != NULL) {
 
       int settings_options;
-      settings_options = 3;  // (select program, action, done)
+      settings_options = 4;  // (select program, action, config, done)
 
       // Main settings screen
       if (screen == "settings" && segNum == 0) {
@@ -345,6 +423,11 @@ void main_task(void* parameter) {
         }
         // user pressed DONE
         if (selectPressed && settingsSel == 3) {
+          screen = "settings_config";
+          configSel = 1;
+        }
+        // user pressed DONE
+        if (selectPressed && settingsSel == 4) {
           screen = "intro";
           introSel = 1;
         }
@@ -368,7 +451,7 @@ void main_task(void* parameter) {
           programNumber = preferences.putInt("programNumber", programNumber);  // save it in EEPROM
           programNumber = preferences.getInt("programNumber", 1);              // retrieve from EEPROM
           screen = "settings";
-          settingsSel = 3;
+          settingsSel = 4;
           tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
         }
       }
@@ -388,10 +471,54 @@ void main_task(void* parameter) {
             preferences.putInt("action", action);
             tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
             screen = "settings";
-            settingsSel = 3;
+            settingsSel = 4;
           }
         }
       }
+    
+      // Config screen
+      if (screen == "settings_config" && segNum == 0) {
+        configScreen(configSel);
+        readButtons();
+
+        if (captive_mode) {
+          dnsServer.processNextRequest();
+          delay(10);
+          if (millis() - lastSSIDUpdate > 15000) {
+            getSSIDs();
+            lastSSIDUpdate = millis();
+          }
+          if (receivedCredentials) {
+            Serial.println("Credentials changed. Initializing WiFi again.");
+            receivedCredentials = false;
+            captive_mode = false;
+            server.end();
+            initWiFi();
+          }
+        }
+
+        if (upPressed && configSel != 1) configSel -= 1;
+        if (downPressed && configSel != 2) configSel += 1;
+        if (selectPressed) {
+          if (configSel == 1) {
+            captive_mode = !captive_mode;
+            if (captive_mode) {
+              StartCaptivePortal();
+              lastSSIDUpdate = millis() - 15000;
+            }
+            else {
+              server.end();
+            }
+          }
+          if (configSel == 2) {
+            preferences.putInt("action", action);
+            tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
+            screen = "settings";
+            settingsSel = 4;
+          }
+        }
+      }
+
     }
 
     //******************************
@@ -730,7 +857,8 @@ void runningScreen() {
 void settingsScreen(int sel) {
   char* option1 = "  SELECT PROGRAM  ";
   char* option2 = "  ACTION  ";
-  char* option3 = "  DONE  ";
+  char* option3 = "  CONFIG  ";
+  char* option4 = "  DONE  ";
 
   switch (sel) {
     case 1:
@@ -740,7 +868,10 @@ void settingsScreen(int sel) {
       option2 = "> ACTION <";
       break;
     case 3:
-      option3 = "> DONE <";
+      option3 = "> CONFIG <";
+      break;      
+    case 4:
+      option4 = "> DONE <";
       break;
   }
 
@@ -748,10 +879,11 @@ void settingsScreen(int sel) {
   tft.setTextSize(3);
   tftPrintCenterWidth("SETTINGS", 40);
   tft.setTextSize(2);
-  tftPrintCenterWidth(option1, 120);
-  tftPrintCenterWidth(option2, 150);
+  tftPrintCenterWidth(option1, 100);
+  tftPrintCenterWidth(option2, 130);
+  tftPrintCenterWidth(option3, 160);
   tft.setCursor(220, 200);
-  tft.print(F(option3));
+  tft.print(F(option4));
 }
 //******************************************************************************************************************************
 //  INTROSCREEN: UPDATE TFT WITH INTRO MENU
@@ -814,30 +946,51 @@ void actionScreen(int actionSel) {
   tftPrint(text3, 220, 200);
 }
 //******************************************************************************************************************************
+//  actionScreen: DISPLAYS ACTION MODE
+//******************************************************************************************************************************
+void configScreen(int configSel) {
+  char* text1;
+  if (!captive_mode) {
+    text1 = "  START CAPTIVE PORTAL  ";
+  } else text1 =  "  STOP CAPTIVE PORTAL   ";
+  char* text2 = "  DONE  ";
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+  tftPrint("CONFIG", 2, 40);
+
+  switch (configSel) {
+    case 1:
+      if (!captive_mode) {
+        text1 = "> START CAPTIVE PORTAL <";
+      } else text1 = "> STOP CAPTIVE PORTAL < ";
+      break;
+    case 2:
+      text2 = "> DONE <";
+      break;
+  }
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tftPrintCenterWidth(text1, 100);
+  tftPrint(text2, 220, 200);
+}
+//******************************************************************************************************************************
 //  openProgram: OPEN AND LOAD A FIRING PROGRAM FILE / DISPLAY ON SCREEN
 //******************************************************************************************************************************
 void openProgram() {
-
   // Setup all variables
-  int col = 1;            // Column number (of text file).  First column is one.
-  int row = 1;            // Row number (of text file).  First row is one.
-  char tempChar;          // Temporary character holder (read one at a time from file)
-  char tempLine[21];      // Temporary character array holder
-  int tempLoc = 0;        // Current location of next character to place in tempLine array
+  StaticJsonDocument<2048> json;
   char programDesc2[21];  // Program description #2 (second line of text file)
   char programDesc3[21];  // Program description #3 (third line of text file)
 
-  // Clear the arrays
-  memset(programDesc1, 0, sizeof(programDesc1));
-  memset(segRamp, 0, sizeof(segRamp));
-  memset(segTemp, 0, sizeof(segTemp));
-  memset(segHold, 0, sizeof(segHold));
-
   // Make sure you can open the file
-  sprintf(tempLine, "/%d.txt", programNumber);
-  fs::File myFile = SPIFFS.open(tempLine, FILE_READ);
+  char filename[20];
+  sprintf(filename, "/firingProgram_%d.json", programNumber);
+  fs::File myFile = SPIFFS.open(filename, FILE_READ);
+  // Parse the JSON file
+  DeserializationError error = deserializeJson(json, myFile);
 
-  if (myFile == false) {
+  if (!myFile || error) {
     tft.setCursor(20, 40);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextSize(2);
@@ -848,60 +1001,22 @@ void openProgram() {
     programOK = false;
     return;
   }
+
   // Load the data
-  while (myFile.available() > 0) {
+  strcpy(programDesc1, json["name"]); // as <String> ?
+  strcpy(programDesc2, json["duration"]);
+  strcpy(programDesc3, json["createdDate"]);
 
-    // Read a single character
-    tempChar = myFile.read();
+  JsonArray segmentsArray = json["segments"].as<JsonArray>();
+  segQuantity = min(segmentsArray.size(), static_cast<size_t>(MAX_SEGMENTS));  // MAX_SEGMENTS is the max size of your arrays
 
-    if (tempChar == 13) {  // Carriage return: Read another char (it is always a line feed / 10).  Add null to end.
-      myFile.read();
-      tempLine[tempLoc] = '\0';
-    } else if (tempChar == 44) {  // Comma: Add null to end.
-      tempLine[tempLoc] = '\0';
-    } else if (tempLoc <= 19) {  // Add it to the temp line array
-      tempLine[tempLoc] = tempChar;
-      tempLoc = tempLoc + 1;
-    }
-
-    if (row == 1 && tempChar == 13) {
-      memcpy(programDesc1, tempLine, 21);
-    } else if (row == 2 && tempChar == 13) {
-      memcpy(programDesc2, tempLine, 21);
-    } else if (row == 3 && tempChar == 13) {
-      memcpy(programDesc3, tempLine, 21);
-    } else if (row >= 4 && col == 1 && tempChar == 44) {
-      segRamp[row - 4] = atoi(tempLine);
-    } else if (row >= 4 && col == 2 && tempChar == 44) {
-      segTemp[row - 4] = atoi(tempLine);
-    } else if ((row >= 4 && col == 3 && tempChar == 13) || myFile.available() == 0) {
-      segHold[row - 4] = atoi(tempLine);
-    }
-
-    if (tempChar == 13) {  // End of line.  Reset everything and goto next line
-      memset(tempLine, 0, 21);
-      tempLoc = 0;
-      row = row + 1;
-      col = 1;
-    }
-
-    if (tempChar == 44) {  // Comma.  Reset everything and goto 1st column
-      memset(tempLine, 0, 21);
-      tempLoc = 0;
-      col = col + 1;
-    }
-
-  }  // end of while(myFile.available ...
-
-  // Close the file
-  myFile.close();
-
-  // Set some variables
-  segQuantity = row - 3;
-  programOK = true;
-
-  // Fix Ramp values so it will show the correct sign (+/-).  This will help to determine when to start hold.
   for (int i = 0; i < segQuantity; i++) {
+    JsonObject segment = segmentsArray[i];
+    segRamp[i] = segment["firingRate"];
+    segTemp[i] = segment["targetTemperature"];
+    segHold[i] = segment["holdingTime"];
+
+    // Fix Ramp values to show the correct sign
     segRamp[i] = abs(segRamp[i]);
     if (i >= 1) {
       if (segTemp[i] < segTemp[i - 1]) {
@@ -909,6 +1024,9 @@ void openProgram() {
       }
     }
   }
+
+  programOK = true;
+  myFile.close();
 
   // Display on the screen
   tft.setCursor(20, 40);
@@ -936,10 +1054,11 @@ void displayErrorMessage(char* title, char* message1, char* message2) {
 void initWiFi() {
   // WiFi initialization
   WiFi.mode(WIFI_STA);
-  for (int i = 0; i < sizeof(network) / sizeof(network[0]); i++) {
-    wifiMulti.addAP(network[i], password[i]);
-  }
+  // for (int i = 0; i < sizeof(network) / sizeof(network[0]); i++) {
+  //   wifiMulti.addAP(network[i], password[i]);
+  // }
 
+  wifiMulti.addAP(ssid.c_str(), password.c_str());
   tft.setTextColor(TFT_WHITE, bar_color);
   tft.setTextSize(1);
   tft.fillRect(0, 0, 320, 20, bar_color);  // clear top notch
@@ -958,7 +1077,8 @@ void initWiFi() {
       Serial.print("Connected to:\t");
       Serial.println(WiFi.SSID());
       connection_OK = true;
-      break;
+      timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
+      return;
     }
   }
 }
@@ -1069,4 +1189,259 @@ void tftPrintCenterWidth(char* text, int y) {
 void tftPrint(char* text, int x, int y) {
   tft.setCursor(x, y);
   tft.print(F(text));
+}
+
+void getSSIDs() {
+  // Provide JSON response with dynamic values
+  int networks = WiFi.scanNetworks();
+  std::set<String> uniqueSSIDs;
+
+  // Get the first 5 unique SSIDs
+  for (int i = 0; i < min(5, networks); ++i) {
+    String ssid_i = WiFi.SSID(i);
+    // Check if the SSID is not repeated
+    if (uniqueSSIDs.find(ssid_i) == uniqueSSIDs.end()) {
+      uniqueSSIDs.insert(ssid_i);
+    }
+  }
+
+  // Construct JSON array with empty values
+  ssidList = "{";
+  for (int i = 1; i <= 5; i++) {
+    String ssidProperty = "SSID" + String(i);
+    if (i > 1) {
+      ssidList += ", ";
+    }
+    ssidList += "\"" + ssidProperty + "\":\"";
+    if (i <= uniqueSSIDs.size()) {
+      ssidList += *std::next(uniqueSSIDs.begin(), i - 1);
+    }
+    ssidList += "\"";
+  }
+  ssidList += "}";
+
+  // Serial.printf("Updated SSID list:\n %s \n ", ssidList.c_str());
+}
+
+void StartCaptivePortal() {
+  Serial.println("Setting up AP Mode");
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("The Kiln Controller", NULL);
+  Serial.print("AP IP address: ");
+  Serial.println(WiFi.softAPIP());
+
+  Serial.println("Setting up Async WebServer");
+  setupServer();
+
+  Serial.println("Starting DNS Server");
+  dnsServer.start(53, "*", WiFi.softAPIP());
+
+  server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
+  server.begin();
+
+  Serial.println("Done!");
+}
+
+void setupServer() {
+  // Web Server Root URL
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(SPIFFS, "/index.html", "text/html");
+    Serial.println("Client connected");
+  });
+
+  // Route for WiFi manager config page
+  server.on("/wifi-manager", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(SPIFFS, "/wifimanager.html", "text/html");
+    Serial.println("WiFi manager initiated");
+  });
+
+  // Route for the program editor page
+  server.on("/program-editor", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(SPIFFS, "/firingProgram.html", "text/html");
+  });
+
+  // Route for the LED control page
+  server.on("/control", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(SPIFFS, "/control.html", "text/html");
+  });
+
+  // Retrieving available SSIDs
+  server.on("/getSSIDList", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Serial.println("getting SSIDs");
+    request->send(200, "application/json", ssidList); // sent as a JSON array
+  });
+
+  // Retrieving WiFi credentials
+  server.on("/wifi-manager", HTTP_POST, [](AsyncWebServerRequest* request) {
+    int params = request->params();
+    for (int i = 0; i < params; i++) {
+      AsyncWebParameter* p = request->getParam(i);
+      if (p->isPost()) {
+        // HTTP POST ssid value
+        if (p->name() == "ssid") {
+          ssid = p->value().c_str();
+          Serial.printf("Received SSID: %s\n", ssid);
+          // Write file to save value
+          writeFile(SPIFFS, ssidPath, ssid.c_str());
+        }
+        // HTTP POST pass value
+        if (p->name() == "password") {
+          password = p->value().c_str();
+          Serial.printf("Received Password: %s\n", password);
+          // Write file to save value
+          writeFile(SPIFFS, passPath, password.c_str());
+        }
+        receivedCredentials = true;
+      }
+    }
+    request->send(200, "text/html", "Values have been saved");
+    delay(3000);
+  });
+
+  // Retrieving firing schedule files
+  server.on("/program-editor", HTTP_POST, [](AsyncWebServerRequest* request) {
+    Serial.println("program editor posted");
+    int params = request->params();
+    int maxIndex = 0;
+
+    for (int i = 0; i < params; i++) {
+      AsyncWebParameter* p = request->getParam(i);
+      if (p->isPost()) {
+        // Process program defining parameters
+        if (p->name() == "programNumber") {
+          currentProgram.programNumber = p->value().toInt();
+          Serial.printf("Received Program Number: %d\n", currentProgram.programNumber);
+        }
+        if (p->name() == "createdDate") {
+          currentProgram.createdDate = p->value().c_str();
+          // Serial.printf("Created Date: %s\n", currentProgram.createdDate.c_str());
+        }
+        if (p->name() == "name") {
+          currentProgram.name = p->value().c_str();
+          Serial.printf("Program Name: %s\n", currentProgram.name.c_str());
+        }
+        if (p->name() == "duration") {
+          currentProgram.duration = p->value().c_str();
+          // Serial.printf("Duration: %s\n", currentProgram.duration.c_str());
+        }
+
+        // Now process segment specific parameters
+        if (p->name().startsWith("target") || p->name().startsWith("speed") || p->name().startsWith("hold")) {
+          int segmentIndex = extractSegmentNumber(p->name()) - 1; // Convert to 0-based index
+          maxIndex = max(segmentIndex, maxIndex);
+
+          if (p->name().startsWith("target")) {
+            currentProgram.segments[segmentIndex].targetTemperature = p->value().toInt();
+          } else if (p->name().startsWith("speed")) {
+            currentProgram.segments[segmentIndex].firingRate = p->value().toInt();
+          } else if (p->name().startsWith("hold")) {
+            currentProgram.segments[segmentIndex].holdingTime = p->value().toInt();
+          }
+        }
+      }
+    }
+    currentProgram.segmentQuantity = maxIndex + 1;
+    Serial.printf("Segment quantity: %d\n", currentProgram.segmentQuantity);
+
+    saveConfigFile();
+
+    request->send(200, "text/html", "Values have been saved");
+    delay(3000);
+  });
+
+  // Route to set GPIO state to HIGH
+  server.on("/control/on", HTTP_POST, [](AsyncWebServerRequest* request) {
+    digitalWrite(ledPin, HIGH);
+    request->send(SPIFFS, "/control.html", "text/html");
+  });
+
+  // Route to set GPIO state to LOW
+  server.on("/control/off", HTTP_POST, [](AsyncWebServerRequest* request) {
+    digitalWrite(ledPin, LOW);
+    request->send(SPIFFS, "/control.html", "text/html");
+  });  
+  
+  // Redirect any request to the root to the configuration page (catch all route)
+  server.onNotFound([](AsyncWebServerRequest* request) {
+    request->redirect("/");
+  });
+
+  server.serveStatic("/", SPIFFS, "/");
+}
+
+int extractSegmentNumber(const String& paramName) {
+    // Find the position of the first digit in the parameter name
+    for (unsigned int i = 0; i < paramName.length(); i++) {
+        if (isDigit(paramName.charAt(i))) {
+            // Extract the substring from the first digit to the end of the string
+            String numberStr = paramName.substring(i);
+            return numberStr.toInt(); // Convert the number string to an integer
+        }
+    }
+    return -1; // Return -1 if no digit is found
+}
+
+void saveConfigFile() {
+  Serial.println(F("Saving config"));
+  StaticJsonDocument<2048> json;
+  json["name"] = currentProgram.name;
+  json["duration"] = currentProgram.duration;
+  json["createdDate"] = currentProgram.createdDate;
+
+  JsonArray segmentsArray = json.createNestedArray("segments");
+
+  for (int i = 0; i < currentProgram.segmentQuantity; i++) {
+    JsonObject segment = segmentsArray.createNestedObject();
+    segment["targetTemperature"] = currentProgram.segments[i].targetTemperature;
+    segment["firingRate"] = currentProgram.segments[i].firingRate;
+    segment["holdingTime"] = currentProgram.segments[i].holdingTime;
+  }
+
+  String fileName = "/firingProgram_" + String(currentProgram.programNumber) + ".json";
+  fs::File configFile = SPIFFS.open(fileName, "w");
+  if (!configFile) {
+    Serial.println("failed to open config file for writing");
+  }
+
+  serializeJsonPretty(json, Serial);
+  if (serializeJson(json, configFile) == 0) {
+    Serial.println(F("Failed to write to file"));
+  }
+  Serial.println();
+  configFile.close();
+}
+
+// Write file to SPIFFS
+void writeFile(fs::FS& fs, const char* path, const char* message) {
+  Serial.printf("Writing file: %s\r\n", path);
+
+  fs::File file = fs.open(path, FILE_WRITE);
+  if (!file) {
+    Serial.println("- failed to open file for writing");
+    return;
+  }
+  if (file.print(message)) {
+    Serial.println("- file written");
+  } else {
+    Serial.println("- frite failed");
+  }
+}
+
+// Read File from SPIFFS
+String readFile(fs::FS& fs, const char* path) {
+  Serial.printf("Reading file: %s\r\n", path);
+
+  fs::File file = fs.open(path);
+  if (!file || file.isDirectory()) {
+    Serial.println("- failed to open file for reading");
+    return String();
+  }
+
+  String fileContent;
+  while (file.available()) {
+    fileContent = file.readStringUntil('\n');
+    break;
+  }
+  return fileContent;
 }

@@ -1,0 +1,153 @@
+html {
+  font-family: Arial, Helvetica, sans-serif; 
+  display: inline-block; 
+  text-align: center;
+}
+
+h1 {
+  font-size: 1.8rem; 
+  color: white;
+  margin: 24px;
+  /*
+  font-size: 32px;
+  text-transform: uppercase;
+  letter-spacing: 8px;
+  text-align: center; */
+}
+
+p { 
+  font-size: 1.5rem;
+}
+
+.topnav { 
+  width: 100%;
+  overflow: hidden; 
+  background-color: #0A1128;
+}
+
+body {  
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #eee;
+  /* height: 100vh; 100% of the viewport height */
+  height: 100%;
+  margin: 0;
+}
+
+.content { 
+  padding: 5%;
+}
+
+.card-grid { 
+  max-width: 800px; 
+  margin: 0 auto; 
+  display: grid; 
+  grid-gap: 2rem; 
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.card { 
+  background-color: white; 
+  box-shadow: 2px 2px 12px 1px rgba(140,140,140,.5);
+}
+
+.card-title { 
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #034078
+}
+
+input[type=submit] {
+  border: none;
+  color: #FEFCFB;
+  background-color: #034078;
+  padding: 25px 10px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 16px;
+  width: 200px;
+  /* margin-right: 10px; */
+  border-radius: 4px;
+  transition-duration: 0.4s;
+  }
+
+input[type=submit]:hover {
+  background-color: #1282A2;
+}
+
+input[type=text], input[type=number], select {
+  width: 50%;
+  padding: 12px 20px;
+  margin: 18px;
+  display: inline-block;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+label {
+  font-size: 1.2rem; 
+}
+.value{
+  font-size: 1.2rem;
+  color: #1282A2;  
+}
+.state {
+  font-size: 1.2rem;
+  color: #1282A2;
+}
+button {
+  border: none;
+  color: #FEFCFB;
+  padding: 1em 2em;
+  /* padding: 1em 1em; */
+  text-align: center;
+  font-size: 16px;
+  width: 150px;
+  border-radius: 4px;
+  transition-duration: 0.4s;
+}
+.button-main {
+  width: 200px;
+  padding: 1em 2em;
+  font-size: 1em;
+  margin: 0.5em;
+  background-color: crimson;
+}
+.button-main:hover {
+  background-color: rgb(217, 99, 128);
+}
+.button-on {
+  background-color: #034078;
+}
+.button-on:hover {
+  background-color: #1282A2;
+}
+.button-segment {
+  font-size: 0.9em;
+  /* margin: 0.5em; */
+  background-color: #17d90a;
+}
+.button-segment:hover {
+  background-color: #6ad062;
+}
+.button-off {
+  background-color: #858585;
+}
+.button-off:hover {
+  background-color: #252524;
+} 
+
+form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+fieldset {
+  text-align: center;
+}
+
