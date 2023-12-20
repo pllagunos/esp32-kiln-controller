@@ -58,9 +58,6 @@ int programNumber;           // Current firing program number.  This ties to the
 int screenNum = 1;           // Screen number displayed during firing (1 = temps / 2 = program info / 3 = tools / 4 = done
 int segNum = 0;              // Current segment number running in firing program.  0 means a program hasn't been selected yet.
 int segNum_global = 0;       // "" but for both tasks
-int segHold[MAX_SEGMENTS];   // Hold time for each segment (min).  This starts after it reaches target temp.
-int segRamp[MAX_SEGMENTS];   // Rate of temp change for each segment (deg/hr).
-int segTemp[MAX_SEGMENTS];   // Target temp for each segment (degrees).
 int action;                  // Action methods
 int actionSel = 1;           // Option selected from action screen
 int configSel = 1;
@@ -79,9 +76,9 @@ const char* ssidPath = "/ssid.txt";
 const char* passPath = "/pass.txt";
 
 struct FiringSegment {
-  int targetTemperature;
-  int firingRate;
-  int holdingTime;
+  int targetTemperature; // Target temp for each segment (degrees).
+  int firingRate; // Rate of temp change for each segment (deg/hr).
+  int holdingTime; // Hold time for each segment (min).  This starts after it reaches target temp
 };
 
 struct FiringProgram {
@@ -94,6 +91,7 @@ struct FiringProgram {
 };
 
 FiringProgram currentProgram;
+FiringProgram serverProgram;
 String ssidList;
 String ssid;
 String password;
@@ -553,13 +551,13 @@ void main_task(void* parameter) {
       // Select / Start button
       if (selectPressed && screenNum == 3) {
         if (optionNum == 1) {  // Add 5 min
-          segHold[segNum - 1] = segHold[segNum - 1] + 5;
+          currentProgram.segments[segNum - 1].holdingTime = currentProgram.segments[segNum - 1].holdingTime + 5;
           optionNum = 1;
           screenNum = 2;
         }
 
         if (optionNum == 2) {  // Add 5 deg
-          segTemp[segNum - 1] = segTemp[segNum - 1] + 5;
+          currentProgram.segments[segNum - 1].targetTemperature = currentProgram.segments[segNum - 1].targetTemperature + 5;
           optionNum = 1;
           screenNum = 1;
         }
@@ -574,12 +572,14 @@ void main_task(void* parameter) {
           Serial.printf("rampStart original = %d ms \n", rampStart);
           calcSetPoint = pidInput;  // SP = PV
           Serial.printf("SP = %.2f = pidInput = %.2f \n", calcSetPoint, pidInput);
-          double adjRampHours = (segTemp[segNum - 1] - pidInput) / segRamp[segNum - 1];  // "artificial" spanned t
-          rampStart = millis() - (adjRampHours * 3600000.0);                             // "artificial" ramp start time
+          int segTemp = currentProgram.segments[segNum - 1].targetTemperature;
+          int segRamp = currentProgram.segments[segNum - 1].firingRate;
+          double adjRampHours = (segTemp - pidInput) / segRamp;  // "artificial" spanned t
+          rampStart = millis() - (adjRampHours * 3600000.0);    // "artificial" ramp start time
           Serial.printf("rampStart new = %d ms \n", rampStart);
 
           double TErampHours = (millis() - rampStart) / 3600000.0;
-          double TEcalcSetPoint = lastTemp + (segRamp[segNum - 1] * TErampHours);
+          double TEcalcSetPoint = lastTemp + (segRamp * TErampHours);
           Serial.printf("calculated SV = %.2f \n", TEcalcSetPoint);
 
           optionNum = 1;
@@ -659,21 +659,22 @@ void updatePIDs() {
   }
 
   // Get the last target temperature
-  if (segNum != 1) lastTemp = segTemp[segNum - 2];
+  if (segNum != 1) lastTemp = currentProgram.segments[segNum - 2].targetTemperature;
   // Calculate the new setpoint value.  Don't set above / below target temp
   if (isOnHold == false) {
     // Ramp: measure spanned t and calculate the SP with it
     rampHours = (millis() - rampStart) / 3600000.0;
-    calcSetPoint = lastTemp + (segRamp[segNum - 1] * rampHours);
+    calcSetPoint = lastTemp + (currentProgram.segments[segNum - 1].firingRate * rampHours);
     // fix SP to target temp in case it's more than target temp
-    if (segRamp[segNum - 1] >= 0 && calcSetPoint >= segTemp[segNum - 1]) {
-      calcSetPoint = segTemp[segNum - 1];
+    if (currentProgram.segments[segNum - 1].firingRate >= 0 && calcSetPoint >= currentProgram.segments[segNum - 1].targetTemperature) {
+      calcSetPoint = currentProgram.segments[segNum - 1].targetTemperature;
     }
-    if (segRamp[segNum - 1] < 0 && calcSetPoint <= segTemp[segNum - 1]) {
-      calcSetPoint = segTemp[segNum - 1];
+    if (currentProgram.segments[segNum - 1].firingRate < 0 && calcSetPoint <= currentProgram.segments[segNum - 1].targetTemperature) {
+      calcSetPoint = currentProgram.segments[segNum - 1].targetTemperature;
     }
-  } else {
-    calcSetPoint = segTemp[segNum - 1];  // Hold
+  } 
+  else {
+    calcSetPoint = currentProgram.segments[segNum - 1].targetTemperature;  // Hold
   }
   // Set the target temp.
   pidSetPoint = calcSetPoint;
@@ -693,15 +694,15 @@ void updateSeg() {
   // If door is closed, start hold phase or move to next segment (do I really want this??? what if ramp is negative, opening = cooling)
   if (doorClosed) {
     // Start the hold phase if temp is in range
-    if ((!isOnHold && segRamp[segNum - 1] < 0 && pidInput <= (segTemp[segNum - 1] + tempRange)) ||   // if ramp is negative
-        (!isOnHold && segRamp[segNum - 1] >= 0 && pidInput >= (segTemp[segNum - 1] - tempRange))) {  // if ramp is positive
+    if ((!isOnHold && currentProgram.segments[segNum - 1].firingRate < 0 && pidInput <= (currentProgram.segments[segNum - 1].targetTemperature + tempRange)) ||   // if ramp is negative
+        (!isOnHold && currentProgram.segments[segNum - 1].firingRate >= 0 && pidInput >= (currentProgram.segments[segNum - 1].targetTemperature - tempRange))) {  // if ramp is positive
       isOnHold = true;
       holdStart = millis();
     }
     // Go to the next segment if holding and hold time is completed
     if (isOnHold) {
       holdMins = (millis() - holdStart) / 60000.0;
-      if (holdMins >= segHold[segNum - 1]) {
+      if (holdMins >= currentProgram.segments[segNum-1].holdingTime) {
         segNum += 1;
         isOnHold = false;
         rampStart = millis();
@@ -814,14 +815,14 @@ void runningScreen() {
     tft.printf("SEGMENT: %i/%i", segNum, segQuantity);
     if (isOnHold == 0) {
       tft.setCursor(160, 150);
-      tft.printf("Ramp to %i%c", segTemp[segNum - 1], tempScale);
+      tft.printf("Ramp to %i%c", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
       tft.setCursor(160, 170);
-      tft.printf("at %i%c/hr", segRamp[segNum - 1], tempScale);
+      tft.printf("at %i%c/hr", currentProgram.segments[segNum - 1].firingRate, tempScale);
     } else {
       tft.setCursor(160, 150);
-      tft.printf("Hold at %i%c \n", segTemp[segNum - 1], tempScale);
+      tft.printf("Hold at %i%c \n", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
       tft.setCursor(160, 170);
-      tft.printf("for %.0f / %i min", holdMins, segHold[segNum - 1]);
+      tft.printf("for %.0f / %i min", holdMins, currentProgram.segments[segNum-1].holdingTime);
     }
   }
   // Tools screen
@@ -980,8 +981,6 @@ void configScreen(int configSel) {
 void openProgram() {
   // Setup all variables
   StaticJsonDocument<2048> json;
-  char programDesc2[21];  // Program description #2 (second line of text file)
-  char programDesc3[21];  // Program description #3 (third line of text file)
 
   // Make sure you can open the file
   char filename[20];
@@ -1002,25 +1001,25 @@ void openProgram() {
     return;
   }
 
-  // Load the data
-  strcpy(programDesc1, json["name"]); // as <String> ?
-  strcpy(programDesc2, json["duration"]);
-  strcpy(programDesc3, json["createdDate"]);
+  // Load the data into currentProgram struct
+  currentProgram.name = json["name"].as<String>();
+  currentProgram.duration = json["duration"].as<String>();
+  currentProgram.createdDate = json["createdDate"].as<String>();
 
   JsonArray segmentsArray = json["segments"].as<JsonArray>();
   segQuantity = min(segmentsArray.size(), static_cast<size_t>(MAX_SEGMENTS));  // MAX_SEGMENTS is the max size of your arrays
 
   for (int i = 0; i < segQuantity; i++) {
     JsonObject segment = segmentsArray[i];
-    segRamp[i] = segment["firingRate"];
-    segTemp[i] = segment["targetTemperature"];
-    segHold[i] = segment["holdingTime"];
+    currentProgram.segments[i].firingRate = segment["firingRate"].as<int>();
+    currentProgram.segments[i].targetTemperature = segment["targetTemperature"].as<int>();
+    currentProgram.segments[i].holdingTime = segment["holdingTime"].as<int>();
 
     // Fix Ramp values to show the correct sign
-    segRamp[i] = abs(segRamp[i]);
+    currentProgram.segments[i].firingRate = abs(currentProgram.segments[i].firingRate);
     if (i >= 1) {
-      if (segTemp[i] < segTemp[i - 1]) {
-        segRamp[i] = -segRamp[i];
+      if (currentProgram.segments[i].targetTemperature < currentProgram.segments[i - 1].targetTemperature) {
+        currentProgram.segments[i].firingRate = -currentProgram.segments[i].firingRate;
       }
     }
   }
@@ -1032,7 +1031,7 @@ void openProgram() {
   tft.setCursor(20, 40);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-  tft.printf("SELECT PROGRAM: %i \n\n %s \n\n %s \n\n %s", programNumber, programDesc1, programDesc2, programDesc3);
+  tft.printf("SELECT PROGRAM: %i \n\n %s \n\n %s \n\n %s", programNumber, currentProgram.name.c_str(), currentProgram.duration.c_str(), currentProgram.createdDate.c_str());
 }
 //******************************************************************************************************************************
 //  DISPLAYERRORMESSAGE: PRINT AN ERROR ON TFT
@@ -1310,20 +1309,20 @@ void setupServer() {
       if (p->isPost()) {
         // Process program defining parameters
         if (p->name() == "programNumber") {
-          currentProgram.programNumber = p->value().toInt();
-          Serial.printf("Received Program Number: %d\n", currentProgram.programNumber);
+          serverProgram.programNumber = p->value().toInt();
+          Serial.printf("Received Program Number: %d\n", serverProgram.programNumber);
         }
         if (p->name() == "createdDate") {
-          currentProgram.createdDate = p->value().c_str();
-          // Serial.printf("Created Date: %s\n", currentProgram.createdDate.c_str());
+          serverProgram.createdDate = p->value().c_str();
+          // Serial.printf("Created Date: %s\n", serverProgram.createdDate.c_str());
         }
         if (p->name() == "name") {
-          currentProgram.name = p->value().c_str();
-          Serial.printf("Program Name: %s\n", currentProgram.name.c_str());
+          serverProgram.name = p->value().c_str();
+          Serial.printf("Program Name: %s\n", serverProgram.name.c_str());
         }
         if (p->name() == "duration") {
-          currentProgram.duration = p->value().c_str();
-          // Serial.printf("Duration: %s\n", currentProgram.duration.c_str());
+          serverProgram.duration = p->value().c_str();
+          // Serial.printf("Duration: %s\n", serverProgram.duration.c_str());
         }
 
         // Now process segment specific parameters
@@ -1332,17 +1331,17 @@ void setupServer() {
           maxIndex = max(segmentIndex, maxIndex);
 
           if (p->name().startsWith("target")) {
-            currentProgram.segments[segmentIndex].targetTemperature = p->value().toInt();
+            serverProgram.segments[segmentIndex].targetTemperature = p->value().toInt();
           } else if (p->name().startsWith("speed")) {
-            currentProgram.segments[segmentIndex].firingRate = p->value().toInt();
+            serverProgram.segments[segmentIndex].firingRate = p->value().toInt();
           } else if (p->name().startsWith("hold")) {
-            currentProgram.segments[segmentIndex].holdingTime = p->value().toInt();
+            serverProgram.segments[segmentIndex].holdingTime = p->value().toInt();
           }
         }
       }
     }
-    currentProgram.segmentQuantity = maxIndex + 1;
-    Serial.printf("Segment quantity: %d\n", currentProgram.segmentQuantity);
+    serverProgram.segmentQuantity = maxIndex + 1;
+    Serial.printf("Segment quantity: %d\n", serverProgram.segmentQuantity);
 
     saveConfigFile();
 
@@ -1385,20 +1384,20 @@ int extractSegmentNumber(const String& paramName) {
 void saveConfigFile() {
   Serial.println(F("Saving config"));
   StaticJsonDocument<2048> json;
-  json["name"] = currentProgram.name;
-  json["duration"] = currentProgram.duration;
-  json["createdDate"] = currentProgram.createdDate;
+  json["name"] = serverProgram.name;
+  json["duration"] = serverProgram.duration;
+  json["createdDate"] = serverProgram.createdDate;
 
   JsonArray segmentsArray = json.createNestedArray("segments");
 
-  for (int i = 0; i < currentProgram.segmentQuantity; i++) {
+  for (int i = 0; i < serverProgram.segmentQuantity; i++) {
     JsonObject segment = segmentsArray.createNestedObject();
-    segment["targetTemperature"] = currentProgram.segments[i].targetTemperature;
-    segment["firingRate"] = currentProgram.segments[i].firingRate;
-    segment["holdingTime"] = currentProgram.segments[i].holdingTime;
+    segment["targetTemperature"] = serverProgram.segments[i].targetTemperature;
+    segment["firingRate"] = serverProgram.segments[i].firingRate;
+    segment["holdingTime"] = serverProgram.segments[i].holdingTime;
   }
 
-  String fileName = "/firingProgram_" + String(currentProgram.programNumber) + ".json";
+  String fileName = "/firingProgram_" + String(serverProgram.programNumber) + ".json";
   fs::File configFile = SPIFFS.open(fileName, "w");
   if (!configFile) {
     Serial.println("failed to open config file for writing");
