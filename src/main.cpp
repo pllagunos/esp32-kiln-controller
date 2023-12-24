@@ -7,9 +7,6 @@
 #include <SPI.h>                // Serial Peripheral Interface library
 #include <FS.h>                 // File system
 #include <SPIFFS.h>             // For SPI full file system
-#include <WiFiMulti.h>          // Enables conection to multiple WiFi networks
-#include <InfluxDbClient.h>     // Write data to Influx Data Base
-#include <InfluxDbCloud.h>      // Enable Influx Data Cloud storage
 #include <Preferences.h>        // library to save variables to EPROOM
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
@@ -17,12 +14,11 @@
 #include <set>
 #include <ArduinoJson.h>
 
-//****************************
-// VARIABLES
-//****************************
-
 // Setup user variables (CHANGE THESE IN HEADER FILE)
 #include "userSetup.h"
+
+// Include tasks
+#include "database_task.h"
 
 // Internal variables
 unsigned long TFT_start;     // Exact time you refreshed the TFT screen (ms).  Based on millis().
@@ -100,16 +96,13 @@ String password;
 //  SETUP: INITIAL SETUP (RUNS ONCE DURING START)
 //******************************************************************************************************************************
 /* Initialize stuff */
-WiFiMulti wifiMulti;
 AsyncWebServer server(80);
 DNSServer dnsServer;
 TFT_eSPI tft = TFT_eSPI();
 PID pidCont = { PID(&pidInput, &pidOutput, &pidSetPoint, Kp, Ki, Kd, DIRECT) };
 Preferences preferences;
 Adafruit_MAX31856 thermocouple(thermocoupleCS, MAX_DI, MAX_DO, MAX_CLK);
-InfluxDBClient client(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
-Point sensor("HORNO ELECTRICO");
-SemaphoreHandle_t DataSemaphore;
+SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
 
 class CaptiveRequestHandler : public AsyncWebHandler {
 public:
@@ -126,7 +119,6 @@ public:
 };
 
 // put function declarations here:
-void publishing_task(void*parameter);
 void main_task(void* parameter);
 void htrControl();
 void shutDown();
@@ -142,7 +134,6 @@ void actionScreen(int actionSel);
 void configScreen(int configSel);
 void openProgram();
 void displayErrorMessage(char* title, char* message1, char* message2);
-void initWiFi();
 void drawTopBar();
 int8_t getWifiQuality();
 void resetTFT();
@@ -196,25 +187,21 @@ void setup() {
 
   tft.fillScreen(TFT_BLACK);
 
-  // Initialize WiFi
+  // Retrieve data from SPIFFS
   ssid = readFile(SPIFFS, ssidPath);
   password = readFile(SPIFFS, passPath);
   Serial.println(ssid);
   Serial.println(password);
-  initWiFi();
-  // if (WiFi.status() == WL_CONNECTED) timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
 
   // setup and retrieve data from EEPROM
   preferences.begin("my-app", false);
   programNumber = preferences.getInt("programNumber", 1);
   action = preferences.getInt("action", 0);  // 0 = X
 
-  // Create the semaphore
-  DataSemaphore = xSemaphoreCreateMutex();
   // Create the main task and set its affinity to core 1
   xTaskCreatePinnedToCore(main_task, "Main", 40960, NULL, 1, NULL, 1);
   // Create the publishing task and set its affinity to core 0
-  xTaskCreatePinnedToCore(publishing_task, "Publishing", 40960, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(database_task, "Database", 40960, NULL, 1, NULL, 0);
 
 }
 
@@ -222,60 +209,7 @@ void loop() {
   // Nothing to do here
 }
 
-// Task function to publish data on core 0 *** ADD ALL WIFI CONNETING TASKS HERE TOO **
-void publishing_task(void* parameter) {
-  while (1) {
-    // Check if ESP is not in AP mode
-    xSemaphoreTake(DataSemaphore, portMAX_DELAY);
-    bool captive = captive_mode;
-    if (captive) connection_OK = false;
-    xSemaphoreGive(DataSemaphore);
-
-    // Check WiFi connection
-    if (captive) {
-      Serial.println("not publishing, captive mode ON");
-      delay(5000);
-      continue;
-    }
-
-    // if (credentialsChanged) {
-    //   Serial.println("Credentials changed. Initializing WiFi again.");
-    //   credentialsChanged = false;
-    //   initWiFi();
-    //   continue;
-    // }
-
-    bool connected = (wifiMulti.run() == WL_CONNECTED);
-
-    xSemaphoreTake(DataSemaphore, portMAX_DELAY);
-    connection_OK = connected;
-    // receivedCredentials = credentialsChanged;
-    xSemaphoreGive(DataSemaphore);
-
-    if (connected) {
-      sensor.clearFields();
-      
-      // shared variables: segNum, pidInput, pidSetPoint, pidOutput
-      xSemaphoreTake(DataSemaphore, portMAX_DELAY);  // Wait for the semaphore to become available
-      sensor.addField("Kiln temperature", (int)pidInput_global);
-      sensor.addField("SetPoint", (int)calcSetPoint_global);
-      sensor.addField("Output", (int)pidOutput_global);
-      sensor.addField("Running", (segNum_global > 0));
-      xSemaphoreGive(DataSemaphore);  // Release the semaphore
-
-      // Write data
-      bool published = (client.writePoint(sensor));
-      if (!published) {
-        Serial.print("InfluxDB write failed: ");
-        Serial.println(client.getLastErrorMessage());
-      }
-
-      xSemaphoreTake(DataSemaphore, portMAX_DELAY);
-      influx_OK = published;
-      xSemaphoreGive(DataSemaphore);
-    }
-  }
-}
+//*******************************************************************************************************************************
 
 // Task function to perform all Kiln control on core 1
 void main_task(void* parameter) {
@@ -491,7 +425,7 @@ void main_task(void* parameter) {
             receivedCredentials = false;
             captive_mode = false;
             server.end();
-            initWiFi();
+            // initWiFi();
           }
         }
 
@@ -682,10 +616,10 @@ void updatePIDs() {
   pidCont.Compute();  // (internally it will only compute if sample time has been elapsed)
 
   /* Use Mutex to save global variables*/
-  xSemaphoreTake(DataSemaphore, portMAX_DELAY);  // Wait for the semaphore to become available
+  xSemaphoreTake(mutex, portMAX_DELAY);  // Wait for the semaphore to become available
   calcSetPoint_global = pidSetPoint;
   pidOutput_global = pidOutput;
-  xSemaphoreGive(DataSemaphore);  // Release the semaphore
+  xSemaphoreGive(mutex);  // Release the semaphore
 }
 //******************************************************************************************************************************
 //  UPDATESEG: UPDATE THE PHASE AND SEGMENT
@@ -707,9 +641,9 @@ void updateSeg() {
         isOnHold = false;
         rampStart = millis();
         /* Use Mutex to save global variables*/
-        xSemaphoreTake(DataSemaphore, portMAX_DELAY);  // Wait for the semaphore to become available
+        xSemaphoreTake(mutex, portMAX_DELAY);  // Wait for the semaphore to become available
         segNum_global = segNum;
-        xSemaphoreGive(DataSemaphore);  // Release the semaphore
+        xSemaphoreGive(mutex);  // Release the semaphore
       }
     }
   }
@@ -782,9 +716,9 @@ void readTemps() {
     }
     pidInput_global = t + tempOffset;  // add any offset
     /* Use Mutex to save local pidInput */
-    xSemaphoreTake(DataSemaphore, portMAX_DELAY);  // Wait for the semaphore to become available
+    xSemaphoreTake(mutex, portMAX_DELAY);  // Wait for the semaphore to become available
     pidInput = pidInput_global;
-    xSemaphoreGive(DataSemaphore);  // Release the semaphore
+    xSemaphoreGive(mutex);  // Release the semaphore
   }
 }
 //******************************************************************************************************************************
@@ -1048,40 +982,6 @@ void displayErrorMessage(char* title, char* message1, char* message2) {
   tftPrintCenterWidth(message2, 210);
 }
 //******************************************************************************************************************************
-//  INITWIFI: INITIALIZE WIFI
-//******************************************************************************************************************************
-void initWiFi() {
-  // WiFi initialization
-  WiFi.mode(WIFI_STA);
-  // for (int i = 0; i < sizeof(network) / sizeof(network[0]); i++) {
-  //   wifiMulti.addAP(network[i], password[i]);
-  // }
-
-  wifiMulti.addAP(ssid.c_str(), password.c_str());
-  tft.setTextColor(TFT_WHITE, bar_color);
-  tft.setTextSize(1);
-  tft.fillRect(0, 0, 320, 20, bar_color);  // clear top notch
-  tft.drawString("Connecting...", 240, 8, 1);
-
-  // try connecting for 10s maximum
-  unsigned long init_millis = millis();
-  while (millis() - init_millis < 10000) {
-    if (wifiMulti.run() != WL_CONNECTED) {
-      delay(300);
-      Serial.print(".");
-    } else {
-      Serial.println("WiFi connected");
-      Serial.println("IP address: ");  // Print local IP address
-      Serial.println(WiFi.localIP());
-      Serial.print("Connected to:\t");
-      Serial.println(WiFi.SSID());
-      connection_OK = true;
-      timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
-      return;
-    }
-  }
-}
-//******************************************************************************************************************************
 //  DRAWTOPBAR: DRAW WIFI BARS, PERCENTAGE AND INFLUX STATE
 //******************************************************************************************************************************
 void drawTopBar() {
@@ -1091,10 +991,10 @@ void drawTopBar() {
 
   bool published;
   bool connected;
-  xSemaphoreTake(DataSemaphore, portMAX_DELAY);
+  xSemaphoreTake(mutex, portMAX_DELAY);
   published = influx_OK;
   connected = connection_OK;
-  xSemaphoreGive(DataSemaphore);
+  xSemaphoreGive(mutex);
 
   if (connected) {
     int8_t quality = getWifiQuality();

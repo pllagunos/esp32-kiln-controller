@@ -8,12 +8,12 @@
 const int tempCycle = 2500;              // Temperature reading cycle
 const int maxTemp = 1300;                // Maximum temperature (degrees).  If reached, will shut down.
 const int heatingCycle = 2500;           // Time for a complete PID on/off cycle for the heating elements (ms)
-double Kp = 800, Ki = 47.37, Kd = 4.93;  // PID constants (tunings), VERY IMPORTANT TO GET THEM RIGHT.
+inline double Kp = 800, Ki = 47.37, Kd = 4.93;  // PID constants (tunings), VERY IMPORTANT TO GET THEM RIGHT.
 const int tempOffset = 0;                // Temp offset (degrees) of thermocouple, either from a cold zone or exernal factors. This is added to the setpoint.
 const int tempRange = 2;                 // This is how close the temp reading needs to be to the set point to shift to the hold phase (degrees).  Set to zero or a positive integer.
 const char tempScale = 'C';              // Temperature scale.  F = Fahrenheit.  C = Celsius
 const int WiFi_refresh = 4000;           // Refresh rate to update WiFi quality (ms)
-max31856_thermocoupletype_t TCTYPE = MAX31856_TCTYPE_S;
+inline max31856_thermocoupletype_t TCTYPE = MAX31856_TCTYPE_S;
 const int MAX_SEGMENTS = 20;             // Maximum number of segments in a firing program
 // // Network credentials: 
 // const char* network1 = "networkSSID";  //"networkSSID";
