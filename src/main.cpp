@@ -1,7 +1,6 @@
 // Libraries to include
 #include <Arduino.h>
 #include <Wire.h>
-#include <TFT_eSPI.h>           // Graphics and font library for ILI9341 driver chip
 #include "Adafruit_MAX31856.h"  // thermocouple card library (56)
 #include <PID_v1.h>             // PID temp control library
 #include <SPI.h>                // Serial Peripheral Interface library
@@ -13,6 +12,9 @@
 #include <DNSServer.h>
 #include <set>
 #include <ArduinoJson.h>
+#include "FiringProgram.h"
+
+#include "gui.h"
 
 // Setup user variables (CHANGE THESE IN HEADER FILE)
 #include "userSetup.h"
@@ -42,49 +44,22 @@ double rampHours;            // Time it has spent in ramp (hours)
 double lastRampHours;        // Last saved elapsed time of ramp (hours)
 double holdMins;             // Time it has spent in hold (mins)
 double lastHoldMins;         // Last saved elapsed time in hold (mins)
-char programDesc1[21];       // Program description #1 (first line of text file)
-char* screen = "intro";      // Variable that holds screen type (start with intro)
-int introSel = 1;            // Intro menu selected option (start or settings)
-int confirmSel;              // Confirm selected option (back or OK)
-int settingsSel = 1;         // Settings menu selected setting
 int segQuantity;             // Last segment number in firing program
 int lastTemp;                // Last setpoint temperature (degrees)
-int optionNum = 1;           // Option selected from screen #3
 int programNumber;           // Current firing program number.  This ties to the file name (ex: 1.txt, 2.txt).
-int screenNum = 1;           // Screen number displayed during firing (1 = temps / 2 = program info / 3 = tools / 4 = done
 int segNum = 0;              // Current segment number running in firing program.  0 means a program hasn't been selected yet.
 int segNum_global = 0;       // "" but for both tasks
 int action;                  // Action methods
-int actionSel = 1;           // Option selected from action screen
-int configSel = 1;
 bool programOK = false;      // Is the program you loaded OK?
 bool isOnHold = 0;           // Current segment phase.  0 = ramp.  1 = hold.
 bool doorClosed = true;      // Kiln door has a limit switch attached to it.
 bool doorClosed_before;      // To check if door state just changed
-bool upPressed = false;      // Up button press state
-bool selectPressed = false;  // Select button press state
-bool downPressed = false;    // Down button press state
 bool influx_OK = false;      // Is InfluxDB publishing working
 bool connection_OK = false;  // Is WiFi connection working
 bool captive_mode = false;
 bool receivedCredentials = false;
 const char* ssidPath = "/ssid.txt";
 const char* passPath = "/pass.txt";
-
-struct FiringSegment {
-  int targetTemperature; // Target temp for each segment (degrees).
-  int firingRate; // Rate of temp change for each segment (deg/hr).
-  int holdingTime; // Hold time for each segment (min).  This starts after it reaches target temp
-};
-
-struct FiringProgram {
-  int programNumber;
-  String name;
-  String duration;
-  String createdDate;
-  FiringSegment segments[MAX_SEGMENTS];
-  int segmentQuantity;
-};
 
 FiringProgram currentProgram;
 FiringProgram serverProgram;
@@ -98,7 +73,6 @@ String password;
 /* Initialize stuff */
 AsyncWebServer server(80);
 DNSServer dnsServer;
-TFT_eSPI tft = TFT_eSPI();
 PID pidCont = { PID(&pidInput, &pidOutput, &pidSetPoint, Kp, Ki, Kd, DIRECT) };
 Preferences preferences;
 Adafruit_MAX31856 thermocouple(thermocoupleCS, MAX_DI, MAX_DO, MAX_CLK);
@@ -126,21 +100,22 @@ void checkDoor();
 void updatePIDs();
 void updateSeg();
 void setupPIDs(int state);
+void SPequalPV();
 void readTemps();
-void runningScreen();
-void settingsScreen(int sel);
-void introScreen(int sel);
-void actionScreen(int actionSel);
-void configScreen(int configSel);
+void setSegNum(int value);
+int getSegNum();
+void setLastTemp();
+void setHeatStart(unsigned long value);
+void setRampStart(unsigned long value);
+void setProgramStart(unsigned long value);
+int setProgramNumber(int value);
+int setAction(int value);
+void handleCaptiveModeToggle();
+void handleCaptiveMode();
+bool getIsOnHold();
+double getHoldMins();
 void openProgram();
-void displayErrorMessage(char* title, char* message1, char* message2);
-void drawTopBar();
 int8_t getWifiQuality();
-void resetTFT();
-void readButtons();
-void btnBounce(int btnPin);
-void tftPrintCenterWidth(char* text, int y);
-void tftPrint(char* text, int x, int y);
 String readFile(fs::FS& fs, const char* path);
 void writeFile(fs::FS& fs, const char* path, const char* message);
 void StartCaptivePortal();
@@ -165,27 +140,22 @@ void setup() {
   // doorClosed = !digitalRead(limitSwitchPin);  // door is closed when pin is LOW
   // attachInterrupt(digitalPinToInterrupt(limitSwitchPin), checkDoorISR, CHANGE);
 
+  gui_start();
+
   // Setup thermocouple
-  bool TCbegan = thermocouple.begin();
-  Serial.println(TCbegan);
-  while (!TCbegan) {
-    TCbegan = thermocouple.begin();
-    displayErrorMessage("TC ERROR","Could not initialize thermocouple.", "Check connections");
+  while (!thermocouple.begin()) {
+    disp_error_msg("TC ERROR","Could not initialize thermocouple.", "Check connections");
+    if (digitalRead(rstPin) == LOW) esp_restart();
     delay(200);
   }
   thermocouple.setThermocoupleType(TCTYPE);  // thermocouple.getThermocoupleType
 
-  tft.init();
-  tft.setRotation(3);
-
   // Mount SPIFFS file system
   while (!SPIFFS.begin(true)) {
-    displayErrorMessage("SPIFFS Error", "Can't setup file system.", "Make sure files are uploaded.");
+    disp_error_msg("SPIFFS Error", "Can't setup file system.", "Make sure files are uploaded.");
     if (digitalRead(rstPin) == LOW) esp_restart();
     delay(200);
   }
-
-  tft.fillScreen(TFT_BLACK);
 
   // Retrieve data from SPIFFS
   ssid = readFile(SPIFFS, ssidPath);
@@ -217,14 +187,7 @@ void main_task(void* parameter) {
     //******************************
     // Shutdown if too hot
     if (pidInput >= maxTemp) {
-      tft.fillScreen(TFT_BLACK);
-      tft.setTextColor(TFT_RED, TFT_BLACK);
-      tft.setTextSize(4);
-      tftPrintCenterWidth("ERROR", 80);
-      tft.setTextColor(TFT_WHITE, TFT_BLACK);
-      tft.setTextSize(2);
-      tftPrintCenterWidth("Max temp reached", 150);
-      tftPrintCenterWidth("System was shut down.", 180);
+      disp_error_msg("MAX TEMP REACHED", "System was shut down.", "Press RESET to restart.");
       shutDown();
       while (1) {
         if (digitalRead(rstPin) == LOW) esp_restart();
@@ -253,275 +216,30 @@ void main_task(void* parameter) {
     }
     // Update WiFi quality
     if (millis() - WiFi_start >= WiFi_refresh) {
-      drawTopBar();
+      bool published, connected;
+      xSemaphoreTake(mutex, portMAX_DELAY);
+      published = influx_OK;
+      connected = connection_OK;
+      xSemaphoreGive(mutex);
+
+      int8_t quality;
+      if (connected) {
+        quality = getWifiQuality();
+      }
+
+      drawTopBar(quality, published, connected);
       WiFi_start = millis();
     }
 
-    //******************************
-    // Intro screen
-    if (segNum == 0 && screen == "intro") {
-      readButtons();
-      introScreen(introSel);
-
-      if (upPressed && introSel > 1) {
-        introSel -= 1;
-      }
-      if (downPressed && introSel < 2) {
-        introSel += 1;
-      }
-
-      /* settings */
-      if (selectPressed && introSel == 2) {
-        screen = "settings";  // user pressed settings
-        settingsSel = 1;
-        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-      }
-
-      /* User pressed START */
-      if (selectPressed && introSel == 1) {
-        //shift_register.set(gasPin, HIGH);  // allow gas contactor to be manually energized
-        //shift_register.set(airPin, HIGH);  // air contactor to be manually energized
-        screen = "confirm";                             // go to confirm screen
-        confirmSel = 2;                                 // set selection to OK
-        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-        tft.setTextSize(2);
-        tft.setTextColor(TFT_WHITE, TFT_BLACK);
-        tftPrint("  BACK  ", 10, 200);
-        tftPrint("> OK <", 200, 200);
-
-        openProgram();
-      }
-    }
-    // Confirm program screen: only refreshes if buttons are pressed, great to avoid EMI from contactors
-    if (segNum == 0 && screen == "confirm") {
-      readButtons();
-      tft.setTextSize(2);
-      tft.setTextColor(TFT_WHITE, TFT_BLACK);
-
-      if (upPressed && confirmSel == 2) {
-        confirmSel -= 1;
-        tftPrint("> BACK <", 10, 200);
-        tftPrint("  OK  ", 200, 200);
-      }
-      if (downPressed && confirmSel == 1) {
-        confirmSel += 1;
-        tftPrint("  BACK  ", 10, 200);
-        tftPrint("> OK <", 200, 200);
-      }
-
-      if (selectPressed && confirmSel == 1) {  // pressed back
-        //shift_register.set(gasPin, LOW); // block gas contactor from being energized
-        //shift_register.set(airPin, HIGH);  // air contactor to be manually energized
-        screen = "intro";
-        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
-      }
-
-      if (selectPressed && confirmSel == 2) {  // pressed OK
-        segNum = 1;                            // firing
-        setupPIDs(HIGH);                       // setup PID algorithm
-        lastTemp = pidInput;
-        heatStart = millis();
-        rampStart = millis();
-        programStart = millis();                        // use later to know program duration
-        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-      }
-    }
-
-    //******************************
-    // Settings screens
-    if (strstr(screen, "settings") != NULL) {
-
-      int settings_options;
-      settings_options = 4;  // (select program, action, config, done)
-
-      // Main settings screen
-      if (screen == "settings" && segNum == 0) {
-        settingsScreen(settingsSel);  // Display settings screen
-        readButtons();
-
-        if (upPressed && settingsSel > 1) settingsSel -= 1;
-        if (downPressed && settingsSel < settings_options) settingsSel += 1;
-
-        /* SELECTIONS */
-        if (selectPressed) tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear display except top notch
-        // user pressed SELECT PROGRAM
-        if (selectPressed && settingsSel == 1) {
-          screen = "settings_program";
-        }
-        // user pressed ACTION
-        if (selectPressed && settingsSel == 2) {
-          screen = "settings_action";
-          actionSel = 1;
-        }
-        // user pressed DONE
-        if (selectPressed && settingsSel == 3) {
-          screen = "settings_config";
-          configSel = 1;
-        }
-        // user pressed DONE
-        if (selectPressed && settingsSel == 4) {
-          screen = "intro";
-          introSel = 1;
-        }
-      }
-
-      // Select program screen
-      if (screen == "settings_program" && segNum == 0) {
-        // Serial.print("opening program....");
-        openProgram();
-        // Serial.println("done");
-        readButtons();
-        if (upPressed && programNumber > 1) {
-          programNumber -= 1;
-          tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
-        }
-        if (downPressed) {
-          programNumber += 1;
-          tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
-        }
-        if (selectPressed) {
-          programNumber = preferences.putInt("programNumber", programNumber);  // save it in EEPROM
-          programNumber = preferences.getInt("programNumber", 1);              // retrieve from EEPROM
-          screen = "settings";
-          settingsSel = 4;
-          tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-        }
-      }
-
-      // Action screen
-      if (screen == "settings_action" && segNum == 0) {
-        // action = 0 means X, action = 1 means Y
-        actionScreen(actionSel);
-        readButtons();
-
-        if (upPressed && actionSel != 1) actionSel -= 1;
-        if (downPressed && actionSel != 3) actionSel += 1;
-        if (selectPressed) {
-          if (actionSel == 1) action = 0;  // action = X
-          if (actionSel == 2) action = 1;  // action = Y
-          if (actionSel == 3) {
-            preferences.putInt("action", action);
-            tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-            screen = "settings";
-            settingsSel = 4;
-          }
-        }
-      }
-    
-      // Config screen
-      if (screen == "settings_config" && segNum == 0) {
-        configScreen(configSel);
-        readButtons();
-
-        if (captive_mode) {
-          dnsServer.processNextRequest();
-          delay(10);
-          if (millis() - lastSSIDUpdate > 15000) {
-            getSSIDs();
-            lastSSIDUpdate = millis();
-          }
-          if (receivedCredentials) {
-            Serial.println("Credentials changed. Initializing WiFi again.");
-            receivedCredentials = false;
-            captive_mode = false;
-            server.end();
-            // initWiFi();
-          }
-        }
-
-        if (upPressed && configSel != 1) configSel -= 1;
-        if (downPressed && configSel != 2) configSel += 1;
-        if (selectPressed) {
-          if (configSel == 1) {
-            captive_mode = !captive_mode;
-            if (captive_mode) {
-              StartCaptivePortal();
-              lastSSIDUpdate = millis() - 15000;
-            }
-            else {
-              server.end();
-            }
-          }
-          if (configSel == 2) {
-            preferences.putInt("action", action);
-            tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-            screen = "settings";
-            settingsSel = 4;
-          }
-        }
-      }
-
+    // when not running
+    if (segNum == 0) {
+      gui_idle();
     }
 
     //******************************
     // Running the firing program
     if (segNum >= 1) {
-
-      readButtons();
-      runningScreen();
-
-      // Up arrow button
-      if (upPressed) {
-        if (screenNum == 1) {
-          segNum = segQuantity + 2;
-          tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-        }
-        if (screenNum == 2 || (screenNum == 3 && optionNum == 1)) {
-          screenNum = screenNum - 1;
-          tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-        } else if (screenNum == 3 && optionNum >= 2) {
-          optionNum = optionNum - 1;
-        }
-      }
-      // Down arrow button
-      if (downPressed) {
-        if (screenNum <= 2) {
-          screenNum = screenNum + 1;
-          tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-        } else if (screenNum == 3 && optionNum <= 3) {
-          optionNum = optionNum + 1;
-        }
-      }
-      // Select / Start button
-      if (selectPressed && screenNum == 3) {
-        if (optionNum == 1) {  // Add 5 min
-          currentProgram.segments[segNum - 1].holdingTime = currentProgram.segments[segNum - 1].holdingTime + 5;
-          optionNum = 1;
-          screenNum = 2;
-        }
-
-        if (optionNum == 2) {  // Add 5 deg
-          currentProgram.segments[segNum - 1].targetTemperature = currentProgram.segments[segNum - 1].targetTemperature + 5;
-          optionNum = 1;
-          screenNum = 1;
-        }
-
-        if (optionNum == 3) {  // Goto next segment
-          segNum = segNum + 1;
-          optionNum = 1;
-          screenNum = 2;
-        }
-
-        if (optionNum == 4) {  // SP = PV + required PID adjustment
-          Serial.printf("rampStart original = %d ms \n", rampStart);
-          calcSetPoint = pidInput;  // SP = PV
-          Serial.printf("SP = %.2f = pidInput = %.2f \n", calcSetPoint, pidInput);
-          int segTemp = currentProgram.segments[segNum - 1].targetTemperature;
-          int segRamp = currentProgram.segments[segNum - 1].firingRate;
-          double adjRampHours = (segTemp - pidInput) / segRamp;  // "artificial" spanned t
-          rampStart = millis() - (adjRampHours * 3600000.0);    // "artificial" ramp start time
-          Serial.printf("rampStart new = %d ms \n", rampStart);
-
-          double TErampHours = (millis() - rampStart) / 3600000.0;
-          double TEcalcSetPoint = lastTemp + (segRamp * TErampHours);
-          Serial.printf("calculated SV = %.2f \n", TEcalcSetPoint);
-
-          optionNum = 1;
-          screenNum = 1;
-        }
-
-        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-      }
+      gui_firing();
 
       // Update PID's / turn on heaters / update segment info
       checkDoor();
@@ -657,7 +375,7 @@ void updateSeg() {
   if (segNum - 1 > segQuantity) {
     shutDown();
     segNum = 0;
-    screen = "intro";
+    goToIntroScreen();
   }
 }
 //******************************************************************************************************************************
@@ -671,6 +389,21 @@ void setupPIDs(int state) {
   if (state == HIGH) pidCont.SetMode(AUTOMATIC);
   if (state == LOW) pidCont.SetMode(MANUAL);
 }
+// SP is set equal to PV, times are adjusted acordingly
+void SPequalPV() {
+  Serial.printf("rampStart original = %d ms \n", rampStart);
+  calcSetPoint = pidInput;  // SP = PV
+  Serial.printf("SP = %.2f = pidInput = %.2f \n", calcSetPoint, pidInput);
+  int segTemp = currentProgram.segments[segNum - 1].targetTemperature;
+  int segRamp = currentProgram.segments[segNum - 1].firingRate;
+  double adjRampHours = (segTemp - pidInput) / segRamp;  // "artificial" spanned t
+  rampStart = millis() - (adjRampHours * 3600000.0);    // "artificial" ramp start time
+  Serial.printf("rampStart new = %d ms \n", rampStart);
+
+  double TErampHours = (millis() - rampStart) / 3600000.0;
+  double TEcalcSetPoint = lastTemp + (segRamp * TErampHours);
+  Serial.printf("calculated SP = %.2f \n", TEcalcSetPoint);
+}
 //******************************************************************************************************************************
 //  READTEMPS: Read the temperatures
 //******************************************************************************************************************************
@@ -682,7 +415,7 @@ void readTemps() {
     uint8_t fault = thermocouple.readFault();
     // if there's an error
     if (isnan(t) || (fault & MAX31856_FAULT_OPEN)) {
-      displayErrorMessage("Thermocouple Error", "Failed to read TC", "System was shut down");
+      disp_error_msg("Thermocouple Error", "Failed to read TC", "System was shut down");
       shutDown();
 
       if (digitalRead(rstPin) == LOW) {
@@ -704,7 +437,7 @@ void readTemps() {
   // // if there's an error
   // uint8_t fault = thermocouple.readFault();
   // while (isnan(t) || fault & MAX31856_FAULT_OPEN) {
-  //   displayErrorMessage("Thermocouple Error", "Failed to read TC", "System was shut down");
+  //   disp_error_msg("Thermocouple Error", "Failed to read TC", "System was shut down");
   //   shutDown();
   //   delay(2500);
   // }
@@ -722,194 +455,6 @@ void readTemps() {
   }
 }
 //******************************************************************************************************************************
-//  runningScreen: TFT SCREEN WHEN RUNNING
-//******************************************************************************************************************************
-void runningScreen() {
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
-
-  // Operator screen (temperature)
-  if (screenNum == 1) {
-    tft.setCursor(10, 30);
-    tft.print(F("pv"));
-    tft.setCursor(10, 140);
-    tft.print(F("sv"));
-    tft.setCursor(60, 160);
-    tft.setTextSize(8);
-    tft.printf("%04d%c", (int)pidSetPoint, tempScale);
-    tft.setCursor(60, 60);
-    tft.setTextSize(8);
-    tft.printf("%04d%c", (int)pidInput, tempScale);
-  }
-  // Info screen
-  if (screenNum == 2) {
-    tft.setCursor(0, 40);
-    tft.printf("PROGRAM %i: \n\n%s", programNumber, programDesc1);
-    tft.setCursor(0, 120);
-    tft.printf("SEGMENT: %i/%i", segNum, segQuantity);
-    if (isOnHold == 0) {
-      tft.setCursor(160, 150);
-      tft.printf("Ramp to %i%c", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
-      tft.setCursor(160, 170);
-      tft.printf("at %i%c/hr", currentProgram.segments[segNum - 1].firingRate, tempScale);
-    } else {
-      tft.setCursor(160, 150);
-      tft.printf("Hold at %i%c \n", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
-      tft.setCursor(160, 170);
-      tft.printf("for %.0f / %i min", holdMins, currentProgram.segments[segNum-1].holdingTime);
-    }
-  }
-  // Tools screen
-  if (screenNum == 3) {
-    tftPrintCenterWidth("TOOLS:", 30);
-    char* option1 = "  Add 5 min  ";
-    char* option2 = "  Increase 5 deg  ";
-    char* option3 = "  Skip to next segment  ";
-    char* option4 = "  Equal SV and PV  ";
-    switch (optionNum) {
-      case 1:
-        option1 = "> Add 5 min <";
-        break;
-      case 2:
-        option2 = "> Increase 5 deg <";
-        break;
-      case 3:
-        option3 = "> Skip to next segment <";
-        break;
-      case 4:
-        option4 = "> Equal SV and PV <";
-        break;
-    }
-    tftPrintCenterWidth(option1, 80);
-    tftPrintCenterWidth(option2, 100);
-    tftPrintCenterWidth(option3, 120);
-    tftPrintCenterWidth(option4, 140);
-  }
-}
-//******************************************************************************************************************************
-//  SETTINGSSCREEN: UPDATE TFT WITH SETTINGS MENU
-//******************************************************************************************************************************
-void settingsScreen(int sel) {
-  char* option1 = "  SELECT PROGRAM  ";
-  char* option2 = "  ACTION  ";
-  char* option3 = "  CONFIG  ";
-  char* option4 = "  DONE  ";
-
-  switch (sel) {
-    case 1:
-      option1 = "> SELECT PROGRAM <";
-      break;
-    case 2:
-      option2 = "> ACTION <";
-      break;
-    case 3:
-      option3 = "> CONFIG <";
-      break;      
-    case 4:
-      option4 = "> DONE <";
-      break;
-  }
-
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(3);
-  tftPrintCenterWidth("SETTINGS", 40);
-  tft.setTextSize(2);
-  tftPrintCenterWidth(option1, 100);
-  tftPrintCenterWidth(option2, 130);
-  tftPrintCenterWidth(option3, 160);
-  tft.setCursor(220, 200);
-  tft.print(F(option4));
-}
-//******************************************************************************************************************************
-//  INTROSCREEN: UPDATE TFT WITH INTRO MENU
-//******************************************************************************************************************************
-void introScreen(int sel) {
-  tft.setCursor(10, 70);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
-  tft.print(F("pv"));
-  tft.setCursor(60, 60);
-  tft.setTextSize(8);
-  tft.printf("%04d%c", (int)pidInput, tempScale);
-  tft.setTextSize(3);
-
-  if (sel == 1) {
-    tftPrintCenterWidth("> START <", 140);
-    tftPrintCenterWidth("  SETTINGS  ", 180);
-  }
-  if (sel == 2) {
-    tftPrintCenterWidth("  START  ", 140);
-    tftPrintCenterWidth("> SETTINGS <", 180);
-  }
-}
-//******************************************************************************************************************************
-//  actionScreen: DISPLAYS ACTION MODE
-//******************************************************************************************************************************
-void actionScreen(int actionSel) {
-  char* text1 = "  X  ";
-  char* text2 = "  Y  ";
-  char* text3 = "  DONE  ";
-
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
-  tftPrint("ACTION", 2, 40);
-
-  switch (actionSel) {
-    case 1:
-      text1 = "> X <";
-      break;
-    case 2:
-      text2 = "> Y <";
-      break;
-    case 3:
-      text3 = "> DONE <";
-      break;
-  }
-
-  if (action == 0) {
-    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-    tftPrintCenterWidth(text1, 100);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tftPrintCenterWidth(text2, 130);
-  }
-  if (action == 1) {
-    tftPrintCenterWidth(text1, 100);
-    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-    tftPrintCenterWidth(text2, 130);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  }
-  tftPrint(text3, 220, 200);
-}
-//******************************************************************************************************************************
-//  actionScreen: DISPLAYS ACTION MODE
-//******************************************************************************************************************************
-void configScreen(int configSel) {
-  char* text1;
-  if (!captive_mode) {
-    text1 = "  START CAPTIVE PORTAL  ";
-  } else text1 =  "  STOP CAPTIVE PORTAL   ";
-  char* text2 = "  DONE  ";
-
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
-  tftPrint("CONFIG", 2, 40);
-
-  switch (configSel) {
-    case 1:
-      if (!captive_mode) {
-        text1 = "> START CAPTIVE PORTAL <";
-      } else text1 = "> STOP CAPTIVE PORTAL < ";
-      break;
-    case 2:
-      text2 = "> DONE <";
-      break;
-  }
-
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tftPrintCenterWidth(text1, 100);
-  tftPrint(text2, 220, 200);
-}
-//******************************************************************************************************************************
 //  openProgram: OPEN AND LOAD A FIRING PROGRAM FILE / DISPLAY ON SCREEN
 //******************************************************************************************************************************
 void openProgram() {
@@ -924,13 +469,7 @@ void openProgram() {
   DeserializationError error = deserializeJson(json, myFile);
 
   if (!myFile || error) {
-    tft.setCursor(20, 40);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextSize(2);
-    tft.print(F("SELECT PROGRAM: "));
-    tft.println(programNumber);
-    tft.setCursor(20, 60);
-    tft.print(F("Can't find/open file"));
+    disp_program_error();
     programOK = false;
     return;
   }
@@ -962,67 +501,8 @@ void openProgram() {
   myFile.close();
 
   // Display on the screen
-  tft.setCursor(20, 40);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
-  tft.printf("SELECT PROGRAM: %i \n\n %s \n\n %s \n\n %s", programNumber, currentProgram.name.c_str(), currentProgram.duration.c_str(), currentProgram.createdDate.c_str());
-}
-//******************************************************************************************************************************
-//  DISPLAYERRORMESSAGE: PRINT AN ERROR ON TFT
-//******************************************************************************************************************************
-void displayErrorMessage(char* title, char* message1, char* message2) {
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_RED, TFT_BLACK);
-  tft.setTextSize(4);
-  tftPrintCenterWidth("ERROR", 80);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
-  tftPrintCenterWidth(title, 150);
-  tftPrintCenterWidth(message1, 180);
-  tftPrintCenterWidth(message2, 210);
-}
-//******************************************************************************************************************************
-//  DRAWTOPBAR: DRAW WIFI BARS, PERCENTAGE AND INFLUX STATE
-//******************************************************************************************************************************
-void drawTopBar() {
-  int centerY = 10;
-  tft.fillRect(0, 0, 320, 20, bar_color);  // clear top notch
-  tft.setTextSize(1);
+  disp_program();
 
-  bool published;
-  bool connected;
-  xSemaphoreTake(mutex, portMAX_DELAY);
-  published = influx_OK;
-  connected = connection_OK;
-  xSemaphoreGive(mutex);
-
-  if (connected) {
-    int8_t quality = getWifiQuality();
-    tft.setTextColor(TFT_WHITE, bar_color);
-    tft.drawString(String(quality) + "%", 290, centerY, 1);
-    for (int8_t i = 0; i < 4; i++) {
-      for (int8_t j = 0; j < 2 * (i + 1); j++) {
-        if (quality > i * 25) {
-          tft.drawPixel(270 + 2 * i, (centerY + 7) - j, TFT_GREEN);
-        }
-      }
-    }
-  } else {
-    tft.setTextColor(TFT_RED, bar_color);
-    tft.drawString("OFFLINE", 270, centerY, 1);
-  }
-  // Draw Influx check mark or cross
-  if (published) {
-    tft.drawLine(16, centerY + 1, 19, centerY + 4, TFT_GREEN);  // Draw the first diagonal line
-    tft.drawLine(19, centerY + 3, 23, centerY + 0, TFT_GREEN);  // Draw the second diagonal line
-    tft.drawLine(16, centerY + 2, 19, centerY + 5, TFT_GREEN);  // Draw the first inner diagonal line
-    tft.drawLine(19, centerY + 4, 23, centerY + 1, TFT_GREEN);  // Draw the second inner diagonal line
-    tft.drawLine(17, centerY + 1, 20, centerY + 4, TFT_GREEN);  // Draw the first outer diagonal line
-    tft.drawLine(20, centerY + 3, 24, centerY + 0, TFT_GREEN);  // Draw the second outer diagonal line
-  } else {
-    tft.drawLine(17, centerY - 1, 23, centerY + 5, TFT_RED);  // Draw the first diagonal line
-    tft.drawLine(23, centerY - 1, 17, centerY + 5, TFT_RED);  // Draw the second diagonal line
-  }
 }
 //******************************************************************************************************************************
 //  GETWIFIQUALITY: GETS RSSI AND CONVERTS IT FROM DBM TO %
@@ -1037,59 +517,83 @@ int8_t getWifiQuality() {
     return 2 * (dbm + 100);
   }
 }
-//******************************************************************************************************************************
-//  RESETTFT: RESETS TFT WHEN CONTACTORS ARE OPENED (EMF) OR USER CALLS IT
-//******************************************************************************************************************************
-void resetTFT() {
-  tft.init();
-  tft.setRotation(3);
-  tft.fillScreen(TFT_BLACK);
-}
-//******************************************************************************************************************************
-//  READBUTTONS: READ IF BUTTONS ARE PRESSED
-//******************************************************************************************************************************
-void readButtons() {
-  upPressed = false;
-  selectPressed = false;
-  downPressed = false;
 
-  if (digitalRead(upPin) == LOW) {
-    upPressed = true;
-    btnBounce(upPin);
-    // Serial.println("up pressed");
-  }
-  if (digitalRead(selectPin) == LOW) {
-    selectPressed = true;
-    btnBounce(selectPin);
-  }
-  if (digitalRead(downPin) == LOW) {
-    downPressed = true;
-    btnBounce(downPin);
-    // Serial.println("down pressed");
-  }
-}
+//*******************************************************************************************************************************
+// GUI called functions
 //******************************************************************************************************************************
-//  BTNBOUNCE: HOLD UNTIL BUTTON IS RELEASED.  DELAY FOR ANY BOUNCE
-//******************************************************************************************************************************
-void btnBounce(int btnPin) {
-  while (digitalRead(btnPin) == LOW) {}
-  delay(25);
-}
-//******************************************************************************************************************************
-//  TFTPRINTCENTERWIDTH: CENTERS CURSOR ON WIDTH AND PRINTS
-//******************************************************************************************************************************
-void tftPrintCenterWidth(char* text, int y) {
-  tft.setCursor((tftwidth - tft.textWidth(text)) / 2, y);
-  tft.print(F(text));
-}
-//******************************************************************************************************************************
-//  TFTPRINT: SETS CURSOR ON (X,Y) AND PRINTS
-//******************************************************************************************************************************
-void tftPrint(char* text, int x, int y) {
-  tft.setCursor(x, y);
-  tft.print(F(text));
+
+void setSegNum(int value) {
+    segNum = value;
 }
 
+int getSegNum() {
+  return segNum;
+}
+
+void setLastTemp() {
+  lastTemp = pidInput;
+}
+
+void setHeatStart(unsigned long value) {
+  heatStart = value;
+}
+
+void setRampStart(unsigned long value) {
+  rampStart = value;
+}
+
+void setProgramStart(unsigned long value) {
+  programStart = value;
+}
+
+int setProgramNumber(int value) {
+  preferences.putInt("programNumber", programNumber);  // save it in EEPROM
+  return preferences.getInt("programNumber", 1);    // read it back from EEPROM
+}
+
+int setAction(int value){
+  preferences.putInt("action", action);  // save it in EEPROM
+  return preferences.getInt("action", 0);    // read it back from EEPROM
+}
+
+void handleCaptiveModeToggle() {
+    captive_mode = !captive_mode;
+    if (captive_mode) {
+        StartCaptivePortal();
+        lastSSIDUpdate = millis() - 15000;
+    } 
+    else {
+      server.end();
+    }
+}
+
+void handleCaptiveMode() {
+  dnsServer.processNextRequest();
+  delay(10);
+  if (millis() - lastSSIDUpdate > 15000) {
+    getSSIDs();
+    lastSSIDUpdate = millis();
+  }
+  if (receivedCredentials) {
+    Serial.println("Credentials changed. Initializing WiFi again.");
+    receivedCredentials = false;
+    captive_mode = false;
+    server.end();
+    // initWiFi();
+  }
+}
+
+bool getIsOnHold() {
+  return isOnHold;
+}
+
+double getHoldMins() {
+  return holdMins;
+}
+
+//******************************************************************************************************************************
+// Server related functions
+//******************************************************************************************************************************
 void getSSIDs() {
   // Provide JSON response with dynamic values
   int networks = WiFi.scanNetworks();

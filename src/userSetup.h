@@ -14,7 +14,6 @@ const int tempRange = 2;                 // This is how close the temp reading n
 const char tempScale = 'C';              // Temperature scale.  F = Fahrenheit.  C = Celsius
 const int WiFi_refresh = 4000;           // Refresh rate to update WiFi quality (ms)
 inline max31856_thermocoupletype_t TCTYPE = MAX31856_TCTYPE_S;
-const int MAX_SEGMENTS = 20;             // Maximum number of segments in a firing program
 // // Network credentials: 
 // const char* network1 = "networkSSID";  //"networkSSID";
 // const char* pwd1 = "password";        //"password";

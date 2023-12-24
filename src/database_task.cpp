@@ -33,6 +33,9 @@ void database_task(void *parameter) {
     // }
 
     wifiMulti.addAP(ssid.c_str(), password.c_str());
+    // xSemaphoreTake(mutex, portMAX_DELAY);
+    // disp_connecting();
+    // xSemaphoreGive(mutex);
     // tft.setTextColor(TFT_WHITE, bar_color);
     // tft.setTextSize(1);
     // tft.fillRect(0, 0, 320, 20, bar_color);  // clear top notch
