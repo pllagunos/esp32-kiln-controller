@@ -4,6 +4,8 @@
 #include <Arduino.h>
 
 void gui_start();
+void gui_run();
+
 void gui_idle();
 void gui_firing();
 
@@ -13,7 +15,8 @@ void actionScreen(int actionSel);
 void configScreen(int configSel);
 void runningScreen();
 
-void drawTopBar(int8_t quality, bool published, bool connected);
+void disp_top_bar();
+// void drawTopBar(int8_t quality, bool published, bool connected);
 void disp_program();
 void disp_error_msg(char* title, char* message1, char* message2);
 void disp_program_error();

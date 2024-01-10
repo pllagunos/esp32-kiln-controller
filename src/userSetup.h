@@ -12,7 +12,8 @@ inline double Kp = 800, Ki = 47.37, Kd = 4.93;  // PID constants (tunings), VERY
 const int tempOffset = 0;                // Temp offset (degrees) of thermocouple, either from a cold zone or exernal factors. This is added to the setpoint.
 const int tempRange = 2;                 // This is how close the temp reading needs to be to the set point to shift to the hold phase (degrees).  Set to zero or a positive integer.
 const char tempScale = 'C';              // Temperature scale.  F = Fahrenheit.  C = Celsius
-const int WiFi_refresh = 4000;           // Refresh rate to update WiFi quality (ms)
+const int topBarCycle = 4000;            // Refresh rate to update top info bar on TFT (ms)
+const int maxSegments = 20;              // Maximum number of segments in a firing program
 inline max31856_thermocoupletype_t TCTYPE = MAX31856_TCTYPE_S;
 // // Network credentials: 
 // const char* network1 = "networkSSID";  //"networkSSID";
@@ -33,7 +34,7 @@ const int heaterPin = 27;       // Pin # connected to relay of heating element.
 const int thermocoupleCS = 33;  // CS pin for thermocouple. SPI is hardware such that: DO -> MISO (19), CLK -> SCLK (18)
 const int limitSwitchPin = 25;  // Pin # connected to safety limit switch mounted on kiln door
 const int rstPin = 22;          // Pin # connected to reset button
-const int ledPin = 2;
+const int ledPin = 5;
 /* temporary SPI pins for thermocouple */
 const int MAX_CLK = 13;
 const int MAX_DO = 14;
