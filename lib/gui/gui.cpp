@@ -1,11 +1,27 @@
-#include "gui.h"
+#include <Preferences.h>
+#include <SPI.h>
+#include <TFT_eSPI.h>
+#include <ArduinoJson.h>
+
 #include "userSetup.h"
 #include "common.h"
 
-#include "network.h"
+// fix the include errors from network, but WHY
+#include <AsyncTCP.h>
+#include <DNSServer.h>
+#include <ESPAsyncWebServer.h>
+#include <WiFiMulti.h>
+#include <FS.h>          
+#include <SPIFFS.h>      
+#include <set>
+#include <PID_v1.h>
+#include "network.h" // This causes circular dependency
+
 #include "heat_control.h"
-#include "SPI.h"
-#include "TFT_eSPI.h"
+#include "gui.h"
+
+extern heat_control controller;
+extern Network network;
 
 static const char *TAG = "gui";
 
@@ -15,6 +31,7 @@ namespace {
   bool upPressed = false;      // Up button press state
   bool selectPressed = false;  // Select button press state
   bool downPressed = false;    // Down button press state
+  bool programOK;               // Is the program loaded correctly?
 
   int introSel = 1;            // Intro menu selected option (start or settings)
   int confirmSel;              // Confirm selected option (back or OK)
@@ -23,6 +40,10 @@ namespace {
   int configSel = 1;
   int screenNum = 1;           // Screen number displayed during firing (1 = temps / 2 = program info / 3 = tools / 4 = done
   int optionNum = 1;           // Option selected from screen #3
+  int programNumber;            // Current firing program number.  This ties to the file name
+  int action;                   // Action methods (what for?)
+  
+  unsigned long topBar_start;   // Time to start top bar refresh
 }
 
 // global variables
@@ -30,6 +51,7 @@ namespace {
 // extern bool captive_mode;
 // extern bool receivedCredentials;
 
+Preferences preferences; // For saving settings
 TFT_eSPI tft = TFT_eSPI();
 
 void gui_start() {
@@ -42,6 +64,8 @@ void gui_start() {
   tft.setRotation(3);
   tft.fillScreen(TFT_BLACK);
 
+  // setup and retrieve data from EEPROM
+  preferences.begin("my-app", false);
   programNumber = preferences.getInt("programNumber", 1);
   action = preferences.getInt("action", 0); // 0 = X
 }
@@ -236,7 +260,9 @@ void gui_idle() {
 
       // ***********************
       // This here is not GUI
-      if (network.get_captive_mode()) {
+      bool mode_is_captive = network.get_captive_mode();
+      if (mode_is_captive) {
+        // Serial.printf("Captive mode is ON\n");
         network.handleCaptiveMode();
       }
       // ***********************

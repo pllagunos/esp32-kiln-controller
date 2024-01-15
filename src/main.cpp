@@ -1,29 +1,30 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>               
-#include <Preferences.h>
-#include <ArduinoJson.h>
-#include <FS.h>          
 #include <SPIFFS.h>    
 
 #include "userSetup.h"      // Setup user variables (CHANGE THESE IN HEADER FILE)
 #include "common.h"         // Common variables and functions
 
 #include "gui.h"            // Graphical user interface source file
-#include "network.h"        // WiFi and Server related code
 #include "heat_control.h"   // PID and heating control code
+#include "network.h"        // WiFi and Server related code
 #include "database_task.h"  // Influx DB publishing task
 #include "sensor_task.h"    // Thermocouple reading task
 
-// Internal variables
-bool programOK = false;       // Is the program you loaded OK?                   
+// global (shared) variables definition
+double g_pidInput;
+double g_pidOutput;
+double g_pidSetPoint;
+int g_segNum;
+bool g_connected;
+bool g_published;
 
-// External variables initialization
+// External objects initialization
 FiringProgram currentProgram;
 SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
-Preferences preferences;
 heat_control controller(mutex);
-Network network(mutex, SPIFFS);
+Network network(mutex, controller, SPIFFS);
 
 // put function declarations here:
 void main_task(void* parameter);
@@ -52,9 +53,6 @@ void setup() {
 
   // Setup WiFi
   network.initWiFi();
-
-  // setup and retrieve data from EEPROM
-  preferences.begin("my-app", false);
 
   // Create the main task and set its affinity to core 1
   xTaskCreatePinnedToCore(main_task, "Main", 40960, NULL, 1, NULL, 1);

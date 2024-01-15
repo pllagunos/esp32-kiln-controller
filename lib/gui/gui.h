@@ -8,6 +8,7 @@ void gui_run();
 
 void gui_idle();
 void gui_firing();
+void openProgram();
 
 void introScreen(int sel);
 void settingsScreen(int sel);

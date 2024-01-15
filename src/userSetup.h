@@ -1,9 +1,6 @@
 #ifndef USERSETUP_H
 #define USERSETUP_H
 
-#include "Adafruit_MAX31856.h"  // Thermocouple card library
-#include "PID_v1.h"
-
 // Setup user variables (CHANGE THESE TO MATCH YOUR SETUP)
 const int tempCycle = 2500;              // Temperature reading cycle
 const int maxTemp = 1300;                // Maximum temperature (degrees).  If reached, will shut down.
@@ -14,7 +11,7 @@ const int tempRange = 2;                 // This is how close the temp reading n
 const char tempScale = 'C';              // Temperature scale.  F = Fahrenheit.  C = Celsius
 const int topBarCycle = 4000;            // Refresh rate to update top info bar on TFT (ms)
 const int maxSegments = 20;              // Maximum number of segments in a firing program
-inline max31856_thermocoupletype_t TCTYPE = MAX31856_TCTYPE_S;
+const String TCTYPE = "S";               // Thermocouple type.  B = B-type, S = S-type, K = K-type, R = R-type, N = N-type, E = E-type, J = J-type, T = T-type   
 // // Network credentials: 
 // const char* network1 = "networkSSID";  //"networkSSID";
 // const char* pwd1 = "password";        //"password";

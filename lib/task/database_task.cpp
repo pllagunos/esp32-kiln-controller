@@ -2,9 +2,13 @@
 #include <InfluxDbClient.h> // Write data to Influx Data Base
 #include <InfluxDbCloud.h>  // Enable Influx Data Cloud storage
 
-#include "database_task.h"
 #include "common.h"
 #include "userSetup.h"
+
+#include "network.h"
+#include "database_task.h"
+
+extern Network network;
 
 static const char *TAG = "database_task";
 

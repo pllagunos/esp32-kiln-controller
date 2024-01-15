@@ -12,8 +12,11 @@
 #include <set>
 
 #include "common.h"
-#include "gui.h"
 #include "userSetup.h"
+
+// #include "gui.h"
+#include <PID_v1.h>
+#include "heat_control.h"
 
 class CaptiveRequestHandler : public AsyncWebHandler {
 public:
@@ -29,7 +32,8 @@ public:
 
 class Network {
 public:
-  Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem);
+  Network(SemaphoreHandle_t& mutex, heat_control& controller, 
+  fs::FS& fileSystem);
 
   void initWiFi();
   void setupServer();
@@ -49,12 +53,14 @@ public:
   bool get_captive_mode() const;
 
 private:
+  SemaphoreHandle_t& sharedMutex;
+  heat_control& controller;
+  fs::FS& fileSystem; 
+
   AsyncWebServer server;
   DNSServer dnsServer;
   WiFiMulti wifiMulti;
   StaticJsonDocument<2048> jsonDocument;
-  SemaphoreHandle_t& sharedMutex;
-  fs::FS& fileSystem; 
 
   CaptiveRequestHandler captiveRequestHandler;
 

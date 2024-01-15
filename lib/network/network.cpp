@@ -1,8 +1,8 @@
 #include "network.h"
 
-Network::Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem)
-: server(80), sharedMutex(mutex), fileSystem(fileSystem) {
-  
+Network::Network(SemaphoreHandle_t& mutex, heat_control& controller, fs::FS& fileSystem)
+: server(80), sharedMutex(mutex), controller(controller), fileSystem(fileSystem) {
+
 }
 
 //******************************************************************************************************************************
@@ -339,10 +339,11 @@ String Network::readFile(fs::FS& fs, const char* path) {
 void Network::handleCaptiveModeToggle() {
   captive_mode = !captive_mode;
   if (captive_mode) {
-      StartCaptivePortal();
-      lastSSIDUpdate = millis() - 15000;
+    StartCaptivePortal();
+    lastSSIDUpdate = millis() - 15000;
   } 
   else {
+    Serial.println("Captive mode disabled");
     server.end();
   }
 }
