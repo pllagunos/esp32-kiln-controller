@@ -1,6 +1,8 @@
 #ifndef USERSETUP_H
 #define USERSETUP_H
 
+#include <Arduino.h>
+
 // Setup user variables (CHANGE THESE TO MATCH YOUR SETUP)
 const int tempCycle = 2500;              // Temperature reading cycle
 const int maxTemp = 1300;                // Maximum temperature (degrees).  If reached, will shut down.
@@ -12,16 +14,6 @@ const char tempScale = 'C';              // Temperature scale.  F = Fahrenheit. 
 const int topBarCycle = 4000;            // Refresh rate to update top info bar on TFT (ms)
 const int maxSegments = 20;              // Maximum number of segments in a firing program
 const String TCTYPE = "S";               // Thermocouple type.  B = B-type, S = S-type, K = K-type, R = R-type, N = N-type, E = E-type, J = J-type, T = T-type   
-// // Network credentials: 
-// const char* network1 = "networkSSID";  //"networkSSID";
-// const char* pwd1 = "password";        //"password";
-// const char* network2 = "networkSSID";
-// const char* pwd2 = "password";
-// const char* network3 = "networkSSID";
-// const char* pwd3 = "password";
-// //* fill the network arrays */
-// const char* network[] = {network1, network2, network3};
-// const char* password[] = {pwd1, pwd2, pwd3};
 
 // Setup pin connections (CHANGE THESE TO MATCH YOUR SETUP)
 const int upPin = 16;           // Pin # connected to up arrow button #1
@@ -41,8 +33,6 @@ const int MAX_DI = 26;
 #define bar_color 0x53D2  // Color for top bar
 #define tftwidth 320      // pixel width
 #define tftheight 240     // pixel height
-
-// InfluxDB settings
 
 // InfluxDB v2 server url, e.g. https://eu-central-1-1.aws.cloud2.influxdata.com (Use: InfluxDB UI -> Load Data -> Client Libraries)
 #define INFLUXDB_URL "INFLUX-URL"

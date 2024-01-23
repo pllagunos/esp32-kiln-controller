@@ -14,9 +14,7 @@
 #include "common.h"
 #include "userSetup.h"
 
-// #include "gui.h"
-#include <PID_v1.h>
-#include "heat_control.h"
+#include "gui.h"
 
 class CaptiveRequestHandler : public AsyncWebHandler {
 public:
@@ -27,13 +25,13 @@ public:
 
   void handleRequest(AsyncWebServerRequest *request) {
     request->send(SPIFFS, "/index.html", "text/html");
+    Serial.println("Client connected");
   }
 };
 
 class Network {
 public:
-  Network(SemaphoreHandle_t& mutex, heat_control& controller, 
-  fs::FS& fileSystem);
+  Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem);
 
   void initWiFi();
   void setupServer();
@@ -42,9 +40,8 @@ public:
   void handleCaptiveMode();
   void handleCaptiveModeToggle();
   void saveConfigFile();
-
-  void writeFile(fs::FS& fs, const char* path, const char* message);
-  String readFile(fs::FS& fs, const char* path);
+  void addWifiCredentials(const String& ssid, const String& password);
+  void parseJson(StaticJsonDocument<2048>& json, const String& path);
 
   int extractSegmentNumber(const String& paramName);
   int8_t getWifiQuality();
@@ -54,7 +51,6 @@ public:
 
 private:
   SemaphoreHandle_t& sharedMutex;
-  heat_control& controller;
   fs::FS& fileSystem; 
 
   AsyncWebServer server;
@@ -70,8 +66,6 @@ private:
   String password;
   bool captive_mode = false;
   bool receivedCredentials = false;
-  const char *ssidPath = "/ssid.txt";
-  const char *passPath = "/pass.txt";
   unsigned long lastSSIDUpdate;
 };
 

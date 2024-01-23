@@ -100,7 +100,7 @@
     <form id="firingProgramForm" onsubmit="sendFiringProgram(); return false;">
         <div class="program-description">
             <div>
-                <input type="number" name="programNumber" placeholder="Program Number">
+                <input type="text" name="programNumber" id="programNumber" placeholder="Program Number" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
                 <input type="text" name="createdDate" placeholder="Created Date">
             </div>
             <div>
@@ -118,15 +118,15 @@
                 </div>
                 <div>
                     <label for="target1">Target (°C):</label>
-                    <input type="number" name="target1" id="target1">
+                    <input type="number" name="target1" id="target1" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
                 </div>
                 <div>
                     <label for="speed1">Speed (°C/hr):</label>
-                    <input type="number" name="speed1" id="speed1">
+                    <input type="number" name="speed1" id="speed1" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
                 </div>
                 <div>
                     <label for="hold1">Hold (min):</label>
-                    <input type="number" name="hold1" id="hold1">
+                    <input type="number" name="hold1" id="hold1" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
                 </div>
                 <!-- Button to remove this segment -->
                 <button class="button-main" onclick="removeSegment(this)">Remove</button>

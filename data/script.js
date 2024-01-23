@@ -14,10 +14,11 @@ function loadProgramEditor() {
     .then(html => document.body.innerHTML = html);
 }
 
-function loadControl() {
-  fetch('/control')
+// Exit function
+function exit() {
+  fetch('/exit')
     .then(response => response.text())
-    .then(html => document.body.innerHTML = html);
+    .then(result => console.log(result));
 }
 
 // Function to update SSID list values dynamically
@@ -42,13 +43,6 @@ window.onload = function () {
   updateSSIDList();
   setInterval(updateSSIDList, 15000); // Update every 15 seconds
 };
-
-// Send http post
-function sendCommand(command) {
-  fetch('/control/' + command, { method: 'POST' })
-    .then(response => response.text())
-    .then(result => console.log(result))
-}
 
 // Send WiFi manager form
 function sendWifiManagerForm() {
@@ -98,15 +92,15 @@ function addSegment(event) {
       </div>
       <div>
           <label for="target${newSegmentNumber}">Target (°C):</label>
-          <input type="number" name="target${newSegmentNumber}" id="target${newSegmentNumber}">
+          <input type="number" name="target${newSegmentNumber}" id="target${newSegmentNumber}" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
       </div>
       <div>
           <label for="speed${newSegmentNumber}">Speed (°C/hr):</label>
-          <input type="number" name="speed${newSegmentNumber}" id="speed${newSegmentNumber}">
+          <input type="number" name="speed${newSegmentNumber}" id="speed${newSegmentNumber}" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
       </div>
       <div>
           <label for="hold${newSegmentNumber}">Hold (min):</label>
-          <input type="number" name="hold${newSegmentNumber}" id="hold${newSegmentNumber}">
+          <input type="number" name="hold${newSegmentNumber}" id="hold${newSegmentNumber}" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
       </div>
       <button class="button-main" onclick="removeSegment(this)">Remove</button>
   `;

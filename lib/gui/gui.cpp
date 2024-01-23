@@ -31,7 +31,8 @@ namespace {
   bool upPressed = false;      // Up button press state
   bool selectPressed = false;  // Select button press state
   bool downPressed = false;    // Down button press state
-  bool programOK;               // Is the program loaded correctly?
+  bool programOK;              // Is the program loaded correctly?
+  bool fileExists = true;      // Assume file exists initially 
 
   int introSel = 1;            // Intro menu selected option (start or settings)
   int confirmSel;              // Confirm selected option (back or OK)
@@ -40,10 +41,10 @@ namespace {
   int configSel = 1;
   int screenNum = 1;           // Screen number displayed during firing (1 = temps / 2 = program info / 3 = tools / 4 = done
   int optionNum = 1;           // Option selected from screen #3
-  int programNumber;            // Current firing program number.  This ties to the file name
-  int action;                   // Action methods (what for?)
+  int programNumber;           // Current firing program number.  This ties to the file name
+  int action;                  // Action methods (what for?)
   
-  unsigned long topBar_start;   // Time to start top bar refresh
+  unsigned long topBar_start;  // Time to start top bar refresh
 }
 
 // global variables
@@ -204,19 +205,20 @@ void gui_idle() {
 
     // Select program screen
     if (screen == "settings_program") {
-      // Serial.print("opening program....");
       openProgram();
-      // Serial.println("done");
       readButtons();
+
       if (upPressed && programNumber > 1) {
         programNumber -= 1;
+        fileExists = true;
         tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
       }
       if (downPressed) {
         programNumber += 1;
+        fileExists = true;
         tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
       }
-      if (selectPressed) {
+      if (selectPressed && programOK) {
         preferences.putInt("programNumber", programNumber); // save it in EEPROM
         programNumber =
             preferences.getInt("programNumber", 1); // read it back from EEPROM
@@ -262,7 +264,6 @@ void gui_idle() {
       // This here is not GUI
       bool mode_is_captive = network.get_captive_mode();
       if (mode_is_captive) {
-        // Serial.printf("Captive mode is ON\n");
         network.handleCaptiveMode();
       }
       // ***********************
@@ -547,14 +548,16 @@ void runningScreen() {
 //  Updates top bar of TFT with WiFi and Influx info
 void disp_top_bar() {
 
-  if ( !(millis() - topBar_start > topBarCycle)) {
+  if ( (millis() - topBar_start < topBarCycle)) {
     return;
   }
   int centerY = 10;
   tft.fillRect(0, 0, 320, 20, bar_color); // clear top notch
   tft.setTextSize(1);
 
-  bool connected = network.checkWiFi();
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  bool connected = g_connected;
+  xSemaphoreGive(mutex);
 
   if (connected) {
     int8_t quality = network.getWifiQuality();
@@ -568,7 +571,8 @@ void disp_top_bar() {
         }
       }
     }
-  } 
+  }
+
   else {
     tft.setTextColor(TFT_RED, bar_color);
     tft.drawString("OFFLINE", 270, centerY, 1);
@@ -671,7 +675,6 @@ void readButtons() {
   if (digitalRead(upPin) == LOW) {
     upPressed = true;
     btnBounce(upPin);
-    // Serial.println("up pressed");
   }
   if (digitalRead(selectPin) == LOW) {
     selectPressed = true;
@@ -680,7 +683,6 @@ void readButtons() {
   if (digitalRead(downPin) == LOW) {
     downPressed = true;
     btnBounce(downPin);
-    // Serial.println("down pressed");
   }
 }
 
@@ -695,15 +697,22 @@ void btnBounce(int btnPin) {
 void openProgram() {
   // Setup all variables
   StaticJsonDocument<2048> json;
-
-  // Make sure you can open the file
   char filename[20];
   sprintf(filename, "/firingProgram_%d.json", programNumber);
-  fs::File myFile = SPIFFS.open(filename, FILE_READ);
+
+  // Make sure you can open the file
+  if (!fileExists) {
+    disp_program_error;
+    programOK = false;
+    return;
+  }
+
+  fs::File myFile = SPIFFS.open(filename, FILE_READ); 
   // Parse the JSON file
   DeserializationError error = deserializeJson(json, myFile);
 
   if (!myFile || error) {
+    fileExists = false;
     disp_program_error();
     programOK = false;
     return;
@@ -714,8 +723,8 @@ void openProgram() {
   currentProgram.duration = json["duration"].as<String>();
   currentProgram.createdDate = json["createdDate"].as<String>();
 
+  currentProgram.segmentQuantity = json["segmentQuantity"].as<int>();
   JsonArray segmentsArray = json["segments"].as<JsonArray>();
-  // segQuantity = min(segmentsArray.size(), static_cast<size_t>(MAX_SEGMENTS));  // MAX_SEGMENTS is the max size of your arrays
 
   for (int i = 0; i < currentProgram.segmentQuantity; i++) {
     JsonObject segment = segmentsArray[i];

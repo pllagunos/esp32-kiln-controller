@@ -1,7 +1,7 @@
 #include "network.h"
 
-Network::Network(SemaphoreHandle_t& mutex, heat_control& controller, fs::FS& fileSystem)
-: server(80), sharedMutex(mutex), controller(controller), fileSystem(fileSystem) {
+Network::Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem)
+: server(80), sharedMutex(mutex), fileSystem(fileSystem) {
 
 }
 
@@ -11,30 +11,30 @@ Network::Network(SemaphoreHandle_t& mutex, heat_control& controller, fs::FS& fil
 
 // Initializes WiFi connection
 void Network::initWiFi() {
-  // Retrieve data from SPIFFS
-  ssid = readFile(SPIFFS, ssidPath);
-  password = readFile(SPIFFS, passPath);
+  // Read WiFi credentials from JSON file
+  StaticJsonDocument<2048> json;
+  parseJson(json, "/wifi_credentials.json");
 
   WiFi.mode(WIFI_STA);
-  // for (int i = 0; i < sizeof(network) / sizeof(network[0]); i++) {
-  //   wifiMulti.addAP(network[i], password[i]);
-  // }
 
-  wifiMulti.addAP(ssid.c_str(), password.c_str());
+  // Loop through each credential set
+  JsonArray array = json.as<JsonArray>();
+  for (JsonObject cred : array) {
+    const char* ssid = cred["ssid"];
+    const char* password = cred["password"];
+    wifiMulti.addAP(ssid, password);
+  }
 
   // Display connecting message 
-  // xSemaphoreTake(mutex, portMAX_DELAY);
   disp_connecting();
-  // xSemaphoreGive(mutex);
 
-  // try connecting for 10s maximum
-  unsigned long init_millis = millis();
-  while (millis() - init_millis < 10000) {
+  // try connecting
+  int attempts = 0;
+  while (attempts < 3) {
+    attempts++;
     if (wifiMulti.run() != WL_CONNECTED) {
       delay(300);
-      Serial.print(".");
     } else {
-      Serial.println("WiFi connected");
       Serial.println("IP address: "); // Print local IP address
       Serial.println(WiFi.localIP());
       Serial.print("Connected to:\t");
@@ -78,26 +78,26 @@ int8_t Network::getWifiQuality() {
 
 // HTTP handlers (get and post requests)
 void Network::setupServer() {
-  // Web Server Root URL
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/index.html", "text/html");
-    Serial.println("Client connected");
-  });
-
   // Route for WiFi manager config page
-  server.on("/wifi-manager", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/wifimanager.html", "text/html");
-    Serial.println("WiFi manager initiated");
+  server.on("/wifi-manager", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    request->send(fileSystem, "/wifimanager.html", "text/html");
   });
 
   // Route for the program editor page
-  server.on("/program-editor", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/firingProgram.html", "text/html");
+  server.on("/program-editor", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    request->send(fileSystem, "/firingProgram.html", "text/html");
   });
 
-  // Route for the LED control page
-  server.on("/control", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/control.html", "text/html");
+  // Route when exit is called
+  server.on("/exit", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    // request->send(200, "text/plain", "Exiting captive mode");
+    captive_mode = false;
+    server.end();
+    if (receivedCredentials) {
+      Serial.println("(exit) Credentials changed. Initializing WiFi again.");
+      receivedCredentials = false;
+      initWiFi();
+    }
   });
 
   // Retrieving available SSIDs
@@ -116,21 +116,23 @@ void Network::setupServer() {
         if (p->name() == "ssid") {
           ssid = p->value().c_str();
           Serial.printf("Received SSID: %s\n", ssid);
-          // Write file to save value
-          writeFile(SPIFFS, ssidPath, ssid.c_str());
         }
         // HTTP POST pass value
         if (p->name() == "password") {
           password = p->value().c_str();
           Serial.printf("Received Password: %s\n", password);
-          // Write file to save value
-          writeFile(SPIFFS, passPath, password.c_str());
         }
-        receivedCredentials = true;
       }
     }
-    request->send(200, "text/html", "Values have been saved");
-    delay(3000);
+
+    // Add the new credentials to the JSON array
+    if (!ssid.isEmpty() && !password.isEmpty()) {
+        addWifiCredentials(ssid, password);
+    }
+    receivedCredentials = true;
+
+    // Go back to the main page
+    request->send(fileSystem, "/index.html", "text/html");
   });
 
   // Retrieving firing schedule files
@@ -180,28 +182,16 @@ void Network::setupServer() {
 
     saveConfigFile();
 
-    request->send(200, "text/html", "Values have been saved");
-    delay(3000);
+    // Go back to the main page
+    request->send(fileSystem, "/index.html", "text/html");
   });
-
-  // Route to set GPIO state to HIGH
-  server.on("/control/on", HTTP_POST, [](AsyncWebServerRequest* request) {
-    digitalWrite(ledPin, HIGH);
-    request->send(SPIFFS, "/control.html", "text/html");
-  });
-
-  // Route to set GPIO state to LOW
-  server.on("/control/off", HTTP_POST, [](AsyncWebServerRequest* request) {
-    digitalWrite(ledPin, LOW);
-    request->send(SPIFFS, "/control.html", "text/html");
-  });  
   
   // Redirect any request to the root to the configuration page (catch all route)
-  server.onNotFound([](AsyncWebServerRequest* request) {
-    request->redirect("/");
+  server.onNotFound([this](AsyncWebServerRequest* request) {
+    request->send(fileSystem, "/index.html", "text/html");
   });
 
-  server.serveStatic("/", SPIFFS, "/");
+  server.serveStatic("/", fileSystem, "/");
 }
 
 // Starts captive portal in AP mode
@@ -270,14 +260,15 @@ int Network::extractSegmentNumber(const String& paramName) {
   return -1; // Return -1 if no digit is found
 }
 
-// Saves firing program as JSON file to SPIFFS
+// Saves firing program as JSON file to the fileSystem
 void Network::saveConfigFile() {
   Serial.println(F("Saving config"));
   StaticJsonDocument<2048> json;
   json["name"] = serverProgram.name;
   json["duration"] = serverProgram.duration;
   json["createdDate"] = serverProgram.createdDate;
-
+  
+  json["segmentQuantity"] = serverProgram.segmentQuantity;
   JsonArray segmentsArray = json.createNestedArray("segments");
 
   for (int i = 0; i < serverProgram.segmentQuantity; i++) {
@@ -288,7 +279,7 @@ void Network::saveConfigFile() {
   }
 
   String fileName = "/firingProgram_" + String(serverProgram.programNumber) + ".json";
-  fs::File configFile = SPIFFS.open(fileName, "w");
+  fs::File configFile = fileSystem.open(fileName, FILE_WRITE);
   if (!configFile) {
     Serial.println("failed to open config file for writing");
   }
@@ -301,38 +292,50 @@ void Network::saveConfigFile() {
   configFile.close();
 }
 
-// Write file to SPIFFS
-void Network::writeFile(fs::FS& fs, const char* path, const char* message) {
-  Serial.printf("Writing file: %s\r\n", path);
+void Network::addWifiCredentials(const String& ssid, const String& password) {
+  StaticJsonDocument<2048> json;
+  String fileName = "/wifi_credentials.json";
+  parseJson(json, fileName);
 
-  fs::File file = fs.open(path, FILE_WRITE);
-  if (!file) {
-    Serial.println("- failed to open file for writing");
-    return;
+  // Append new credentials to the array
+  JsonObject newCred = json.createNestedObject();
+  newCred["ssid"] = ssid;
+  newCred["password"] = password;
+
+  // Save the updated credentials back to the file
+  fs::File credentialsFile = fileSystem.open(fileName, FILE_WRITE);
+  if (!credentialsFile) {
+    Serial.println("failed to open config file for writing");
   }
-  if (file.print(message)) {
-    Serial.println("- file written");
-  } else {
-    Serial.println("- frite failed");
+
+  serializeJsonPretty(json, Serial);
+  if (!serializeJson(json, credentialsFile)) {
+    Serial.println(F("Failed to write to file"));
   }
+
+  Serial.println();
+  credentialsFile.close();
 }
 
-// Read File from SPIFFS
-String Network::readFile(fs::FS& fs, const char* path) {
-  Serial.printf("Reading file: %s\r\n", path);
-
-  fs::File file = fs.open(path);
-  if (!file || file.isDirectory()) {
+// Opens .json file and parses it to JSON document object
+void Network::parseJson(StaticJsonDocument<2048>& json, const String& path) {
+  fs::File file = fileSystem.open(path, FILE_READ);
+  if (!file) {
     Serial.println("- failed to open file for reading");
-    return String();
+    return;
+  }
+  
+  DeserializationError error = deserializeJson(json, file);
+  if (error) {
+    Serial.println("Failed to parse JSON, creating new JSON array");
+    json.clear();
+    return;
   }
 
-  String fileContent;
-  while (file.available()) {
-    fileContent = file.readStringUntil('\n');
-    break;
-  }
-  return fileContent;
+  Serial.printf("\n %s \n", path.c_str());
+  serializeJsonPretty(json, Serial);
+  Serial.println();
+  file.close();
 }
 
 // Changes the captive mode, called from GUI
@@ -345,6 +348,11 @@ void Network::handleCaptiveModeToggle() {
   else {
     Serial.println("Captive mode disabled");
     server.end();
+    if (receivedCredentials) {
+      Serial.println("(toggled) Credentials changed. Initializing WiFi again.");
+      receivedCredentials = false;
+      initWiFi();
+    }
   }
 }
 
@@ -355,13 +363,6 @@ void Network::handleCaptiveMode() {
   if (millis() - lastSSIDUpdate > 15000) {
     getSSIDs();
     lastSSIDUpdate = millis();
-  }
-  if (receivedCredentials) {
-    Serial.println("Credentials changed. Initializing WiFi again.");
-    receivedCredentials = false;
-    captive_mode = false;
-    server.end();
-    initWiFi();
   }
 }
 
