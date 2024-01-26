@@ -21,6 +21,7 @@ void database_task(void *parameter) {
   bool published = false;       // Publish status
   bool connected = false;       // WiFi connection status
   bool captiveMode = false;     // Captive mode status
+  int fails = 0;                // Number of publishing fails
 
   while (1) {
     // update global variable
@@ -40,11 +41,12 @@ void database_task(void *parameter) {
       continue;
     }
     
-    // Time sync and validate connection after captive mode / wifi reconnection
-    if (!prevConnected && connected || prevCaptiveMode && !captiveMode) {
-      delay(15000); // give network time to readjust
+    // Time sync and validate connection after captive mode / wifi reconnection / many fails
+    if (!prevConnected && connected || prevCaptiveMode && !captiveMode || fails > 5) {
+      delay(10000); // give network time to readjust
       timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
-
+      fails = 0;
+      
       if (client.validateConnection()) {
         Serial.print("Connected to InfluxDB: ");
         Serial.println(client.getServerUrl());
@@ -70,6 +72,7 @@ void database_task(void *parameter) {
     if (!published) {
       Serial.print("InfluxDB write failed: ");
       Serial.println(client.getLastErrorMessage());
+      fails += 1;
     }
     
   }

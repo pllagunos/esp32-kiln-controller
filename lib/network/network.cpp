@@ -30,7 +30,7 @@ void Network::initWiFi() {
 
   // try connecting
   int attempts = 0;
-  while (attempts < 3) {
+  while (attempts < 2) {
     attempts++;
     if (wifiMulti.run() != WL_CONNECTED) {
       delay(300);
@@ -91,13 +91,14 @@ void Network::setupServer() {
   // Route when exit is called
   server.on("/exit", HTTP_GET, [this](AsyncWebServerRequest* request) {
     // request->send(200, "text/plain", "Exiting captive mode");
-    captive_mode = false;
     server.end();
     if (receivedCredentials) {
       Serial.println("(exit) Credentials changed. Initializing WiFi again.");
       receivedCredentials = false;
+      delay(2000);
       initWiFi();
     }
+    captive_mode = false;
   });
 
   // Retrieving available SSIDs
@@ -340,19 +341,20 @@ void Network::parseJson(StaticJsonDocument<2048>& json, const String& path) {
 
 // Changes the captive mode, called from GUI
 void Network::handleCaptiveModeToggle() {
-  captive_mode = !captive_mode;
-  if (captive_mode) {
+  if (!captive_mode) {
+    captive_mode = true;
     StartCaptivePortal();
     lastSSIDUpdate = millis() - 15000;
   } 
   else {
-    Serial.println("Captive mode disabled");
     server.end();
     if (receivedCredentials) {
       Serial.println("(toggled) Credentials changed. Initializing WiFi again.");
       receivedCredentials = false;
+      delay(2000);
       initWiFi();
     }
+    captive_mode = false;
   }
 }
 

@@ -208,9 +208,12 @@ void gui_idle() {
       openProgram();
       readButtons();
 
-      if (upPressed && programNumber > 1) {
-        programNumber -= 1;
-        fileExists = true;
+      if (upPressed) {
+        if (programNumber > 1) {
+          programNumber -= 1;
+          fileExists = true;
+        }
+        else screen = "settings";
         tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
       }
       if (downPressed) {
@@ -220,12 +223,10 @@ void gui_idle() {
       }
       if (selectPressed && programOK) {
         preferences.putInt("programNumber", programNumber); // save it in EEPROM
-        programNumber =
-            preferences.getInt("programNumber", 1); // read it back from EEPROM
+        programNumber = preferences.getInt("programNumber", 1); // read it back from EEPROM
         screen = "settings";
         settingsSel = 4;
-        tft.fillRect(0, 20, 320, 240 - 20,
-                     TFT_BLACK); // clear screen except top notch
+        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
       }
     }
 
@@ -450,15 +451,19 @@ void actionScreen(int actionSel) {
 void configScreen(int configSel) {
   char* text1;
 
-  if (!network.get_captive_mode()) {
-    text1 = "  START CAPTIVE PORTAL  ";
-  } 
-  else text1 =  "  STOP CAPTIVE PORTAL   ";
-  char* text2 = "  DONE  ";
-
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
   tftPrint("CONFIG", 2, 40);
+  
+  if (!network.get_captive_mode()) {
+    text1 = "  START CAPTIVE PORTAL  ";
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  } 
+  else {
+    text1 =  "  STOP CAPTIVE PORTAL   ";
+    tft.setTextColor(TFT_RED, TFT_BLACK);  
+  }
+  char* text2 = "  DONE  ";
 
   switch (configSel) {
     case 1:
@@ -471,9 +476,9 @@ void configScreen(int configSel) {
       text2 = "> DONE <";
       break;
   }
-
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+ 
   tftPrintCenterWidth(text1, 100);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tftPrint(text2, 220, 200);
 }
 

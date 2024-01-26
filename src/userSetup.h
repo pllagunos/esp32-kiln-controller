@@ -7,7 +7,9 @@
 const int tempCycle = 2500;              // Temperature reading cycle
 const int maxTemp = 1300;                // Maximum temperature (degrees).  If reached, will shut down.
 const int heatingCycle = 2500;           // Time for a complete PID on/off cycle for the heating elements (ms)
-inline double Kp = 800, Ki = 47.37, Kd = 4.93;  // PID constants (tunings), VERY IMPORTANT TO GET THEM RIGHT.
+inline double Kp = 800;                  // PID proportional gain
+inline double Ki = 47.37;                // PID integral gain 
+inline double Kd = 4.93;                 // PID derivative gain
 const int tempOffset = 0;                // Temp offset (degrees) of thermocouple, either from a cold zone or exernal factors. This is added to the setpoint.
 const int tempRange = 2;                 // This is how close the temp reading needs to be to the set point to shift to the hold phase (degrees).  Set to zero or a positive integer.
 const char tempScale = 'C';              // Temperature scale.  F = Fahrenheit.  C = Celsius
@@ -19,15 +21,18 @@ const String TCTYPE = "S";               // Thermocouple type.  B = B-type, S = 
 const int upPin = 16;           // Pin # connected to up arrow button #1
 const int selectPin = 17;       // Pin # connected to select / start button #2
 const int downPin = 21;         // Pin # connected to down arrow button #3
-const int heaterPin = 27;       // Pin # connected to relay of heating element.
-const int thermocoupleCS = 33;  // CS pin for thermocouple. SPI is hardware such that: DO -> MISO (19), CLK -> SCLK (18)
+const int heaterPin = 27;       // Pin # connected to SSR of heating element.
+const int relayPin = 5; //33        // Pin # connected to main relay
 const int limitSwitchPin = 25;  // Pin # connected to safety limit switch mounted on kiln door
 const int rstPin = 22;          // Pin # connected to reset button
-const int ledPin = 5;
 /* temporary SPI pins for thermocouple */
-const int MAX_CLK = 13;
-const int MAX_DO = 14;
-const int MAX_DI = 26;
+// const int MAX_CLK = 13;
+// const int MAX_DO = 14;
+// const int MAX_DI = 26;
+// const int thermocoupleCS = 5;
+
+#define mySDA 33
+#define mySCL 19
 
 // TFT settings
 #define bar_color 0x53D2  // Color for top bar

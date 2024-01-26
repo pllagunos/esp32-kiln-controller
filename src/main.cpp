@@ -48,13 +48,13 @@ void setup() {
 
   // Pin modes
   pinMode(heaterPin, OUTPUT);
+  pinMode(relayPin, OUTPUT);
   pinMode(limitSwitchPin, INPUT_PULLUP); // should it be an interrupt?
-  pinMode(ledPin, OUTPUT);
-
+  
   // Create the main task and set its affinity to core 1
-  xTaskCreatePinnedToCore(main_task, "Main", 4096, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(main_task, "Main", 8192, NULL, 1, NULL, 1);
   // Create the sensor task and set its affinity to core 1
-  xTaskCreatePinnedToCore(sensor_task, "Sensor", 4096, NULL, 1, NULL, 1); 
+  xTaskCreatePinnedToCore(sensor_task, "Sensor", 8192, NULL, 1, NULL, 1); 
   // Create the publishing task and set its affinity to core 0
   xTaskCreatePinnedToCore(database_task, "Database", 32768, NULL, 1, NULL, 0);
 

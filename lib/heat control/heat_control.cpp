@@ -15,6 +15,9 @@ void heat_control::run() {
     adjustHeat();
     updateSeg();
   }
+  else {
+    digitalWrite(relayPin, HIGH); 
+  }
 
   // Synchonize shared task variables
   xSemaphoreTake(mutex, portMAX_DELAY);  // Wait for the semaphore to become available
@@ -27,11 +30,17 @@ void heat_control::run() {
 
 // adjustHeat: CONTROL THE HEATING ELEMENT
 void heat_control::adjustHeat() {
-  if (millis() - heatStart >= heatingCycle) {
+  if (millis() - heatStart >= heatingCycle) { 
     heatStart = millis();
-  }  // maybe heat cycle should also call "updatePIDs" in running task
+  } 
+  // door must be closed
+  if (!doorClosed) {
+    digitalWrite(relayPin, HIGH);  // disconnect power
+    return;
+  }
 
-  if (pidOutput * heatingCycle / 100 >= millis() - heatStart && doorClosed) {  // door must be closed
+  digitalWrite(relayPin, LOW); // enable power
+  if (pidOutput * heatingCycle / 100 >= millis() - heatStart) {
     digitalWrite(heaterPin, HIGH);
   } else {
     digitalWrite(heaterPin, LOW);
@@ -40,6 +49,8 @@ void heat_control::adjustHeat() {
 
 //  SHUTDOWN: SHUT DOWN SYSTEM
 void heat_control::shutDown() {
+  // Disconnect power
+  digitalWrite(relayPin, HIGH);
   // Turn off heating element relay
   digitalWrite(heaterPin, LOW);
   // Turn off PID algorithm
@@ -64,7 +75,6 @@ void heat_control::checkDoor() {
   doorClosed_before = doorClosed;            // save previous door state
   if (digitalRead(limitSwitchPin) == LOW) {  // check new door state
     doorClosed = true;                       // door closed
-    // Serial.println("door closed");
   } else doorClosed = false;                 // door open
 
   // Resume time measurements in PID algorithm
@@ -178,14 +188,6 @@ void heat_control::SPequalPV() {
   double TEcalcSetPoint = lastTemp + (segRamp * TErampHours);
   Serial.printf("calculated SP = %.2f \n", TEcalcSetPoint);
 }
-
-// getter/setter functions
-
-// void heat_control::setSafePidInput(double input) {
-//   xSemaphoreTake(mutex, portMAX_DELAY);
-//   pidInput = input;
-//   xSemaphoreGive(mutex);
-// }
 
 double heat_control::getPV() {
   return pidInput;
