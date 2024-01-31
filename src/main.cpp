@@ -33,8 +33,8 @@ void resetCheck();
 void setup() {
   Serial.begin(115200);
   SPI.begin();
-  delay(250);
 
+  // Sometimes doesn't start, idk why
   gui_start();
 
   // Mount SPIFFS file system
@@ -77,12 +77,12 @@ void main_task(void* parameter) {
 
 //*******************************************************************************************************************************
 
-// Reset button: 200 ms press for TFT, 2s press for system
+// Reset button: short press for TFT, 1.5s press for system
 void resetCheck() {
   if (digitalRead(rstPin) == LOW) {
     unsigned long resetStart = millis();
     while (digitalRead(rstPin) == LOW) {   // Wait for the button to be released
-      if (millis() - resetStart > 2000) {  // reset system
+      if (millis() - resetStart > 1500) {  // reset system
         controller.shutDown();
         esp_restart();
       }
@@ -92,7 +92,7 @@ void resetCheck() {
     if (pressTime >= 2000) {  // If pressed for 2 seconds or more, reset the system
       controller.shutDown();
       esp_restart();
-    } else if (pressTime >= 200) resetTFT();  // If pressed for 200 ms or more, reset the display
+    } else if (pressTime >= 50) resetTFT();  // If pressed for 200 ms or more, reset the display
   }
 }
 

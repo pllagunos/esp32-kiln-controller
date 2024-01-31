@@ -18,21 +18,15 @@ const int maxSegments = 20;              // Maximum number of segments in a firi
 const String TCTYPE = "S";               // Thermocouple type.  B = B-type, S = S-type, K = K-type, R = R-type, N = N-type, E = E-type, J = J-type, T = T-type   
 
 // Setup pin connections (CHANGE THESE TO MATCH YOUR SETUP)
-const int upPin = 16;           // Pin # connected to up arrow button #1
-const int selectPin = 17;       // Pin # connected to select / start button #2
-const int downPin = 21;         // Pin # connected to down arrow button #3
-const int heaterPin = 27;       // Pin # connected to SSR of heating element.
+const int upPin = 16;               // Pin # connected to up arrow button #1
+const int selectPin = 17;           // Pin # connected to select / start button #2
+const int downPin = 21;             // Pin # connected to down arrow button #3
+const int heaterPin = 27;           // Pin # connected to SSR of heating element.
 const int relayPin = 5; //33        // Pin # connected to main relay
-const int limitSwitchPin = 25;  // Pin # connected to safety limit switch mounted on kiln door
-const int rstPin = 22;          // Pin # connected to reset button
-/* temporary SPI pins for thermocouple */
-// const int MAX_CLK = 13;
-// const int MAX_DO = 14;
-// const int MAX_DI = 26;
-// const int thermocoupleCS = 5;
-
-#define mySDA 33
-#define mySCL 19
+const int limitSwitchPin = 25;      // Pin # connected to safety limit switch mounted on kiln door
+const int rstPin = 22;              // Pin # connected to reset button
+const int thermocoupleCS = 33;      // Pin # connected to thermocouple chip select
+const int thermocoupleDRDY = 13;    // Pin # connected to DRDY interrupt of thermocouple ADC
 
 // TFT settings
 #define bar_color 0x53D2  // Color for top bar

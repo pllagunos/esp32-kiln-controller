@@ -18,7 +18,8 @@ function loadProgramEditor() {
 function exit() {
   fetch('/exit')
     .then(response => response.text())
-    .then(result => console.log(result));
+    .then(html => document.body.innerHTML = html);
+    // .then(result => console.log(result));
 }
 
 // Function to update SSID list values dynamically

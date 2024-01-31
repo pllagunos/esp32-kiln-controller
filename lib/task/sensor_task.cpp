@@ -2,8 +2,7 @@
 #include <Wire.h>
 #include <SPIFFS.h>
 
-#include <Adafruit_ADS1X15.h>
-#include <Adafruit_MAX31856.h>  // Thermocouple card library
+#include <ADS1220_WE.h>
 #include <vector>
 
 #include "userSetup.h"
@@ -30,7 +29,8 @@ namespace{
   float multiplier; // for adc
   
   uint16_t adc_bits; 
-  uint8_t fault;
+
+  bool fault = false;
 
   unsigned long tempStart; 
 
@@ -42,15 +42,14 @@ namespace{
   std::vector<TC_TABLE> table;
 }
 
-void setupThermocouple(Adafruit_ADS1115& ads);
-void readTemps(Adafruit_ADS1115& ads);
+void setupThermocouple(ADS1220_WE& ads);
+void readTemps(ADS1220_WE& ads);
 void readCSV(const char* filePath,std::vector<TC_TABLE>& table );  
 float findClosestTemperature(float voltage, const std::vector<TC_TABLE>& table);
 float findClosestVoltage(int temperature, const std::vector<TC_TABLE>& table);
-uint8_t readFault();
 
 void sensor_task(void *pvParameter) {
-  Adafruit_ADS1115 ads;
+  ADS1220_WE ads = ADS1220_WE(thermocoupleCS, thermocoupleDRDY);
   setupThermocouple(ads);
 
   // loop forever
@@ -64,25 +63,18 @@ void sensor_task(void *pvParameter) {
 
 }
 
-uint8_t readFault() {
-  // Check if there's an I2C communication error
-  // return 1; // if error
-  return 0;
-}
-
-void readTemps(Adafruit_ADS1115& ads) {
+void readTemps(ADS1220_WE& ads) {
   while (1) {
-    // implement fault detection
-    fault = readFault();
-
-    // ambTemp = temperatureRead();
-    ambTemp = 20;
+    ads.enableTemperatureSensor(true);
+    ambTemp = ads.getTemperature();
+    ads.enableTemperatureSensor(false); 
     // Serial.printf("\n Cold junction temp: %f degC\n", ambTemp);
 
-    adc_bits = ads.readADC_Differential_0_1(); // between channel 0-1
-    V_TC = adc_bits * multiplier;
-    // Serial.printf("Differential input: %d bits  | %.2f mV\n", adc_bits, V_TC);
+    V_TC = ads.getVoltage_mV(); // get result in millivolts
+    // Serial.printf("Differential voltage: %.2f mV\n", V_TC);
     
+    if (V_TC > table[table.size() - 1].milliVolts) fault = true;
+
     // Magic algorithm
     // unsigned long t = micros();
     V_CJ = findClosestVoltage(ambTemp, table); // find voltage compensation
@@ -128,24 +120,16 @@ void readTemps(Adafruit_ADS1115& ads) {
   }
 }
 
-void setupThermocouple(Adafruit_ADS1115& ads) {
-  Wire.begin(mySDA, mySCL);
-
-  // The ADC input range (or gain) can be changed.  NEVER exceed VDD +0.3V max
-  // ads.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 0.1875mV (default)
-  // ads.setGain(GAIN_ONE);        // 1x gain   +/- 4.096V  1 bit = 0.125mV
-  // ads.setGain(GAIN_TWO);        // 2x gain   +/- 2.048V  1 bit = 0.0625mV
-  // ads.setGain(GAIN_FOUR);       // 4x gain   +/- 1.024V  1 bit = 0.03125mV
-  // ads.setGain(GAIN_EIGHT);      // 8x gain   +/- 0.512V  1 bit = 0.015625mV
-  ads.setGain(GAIN_SIXTEEN);    // 16x gain  +/- 0.256V  1 bit = 0.0078125mV
-  multiplier = 0.0078125F;
-
+void setupThermocouple(ADS1220_WE& ads) {  
   // begin ADS
-  while (!ads.begin()) {
+  while (!ads.init()) {
     disp_error_msg("TC ERROR","Could not initialize thermocouple.", "Check connections");
     if (digitalRead(rstPin) == LOW) esp_restart();
     delay(200);
   }
+
+  ads.setCompareChannels(ADS1220_MUX_0_1);
+  ads.setGain(ADS1220_GAIN_128);
 
   // setup thermocouple type for LUT
   if (TCTYPE == "R") {
@@ -165,7 +149,8 @@ void readCSV(const char* filePath, std::vector<TC_TABLE>&TABLE ) {
   fs::File file = SPIFFS.open(filePath, "r");
 
   if (!file) {
-    Serial.println("Failed to open file");
+    // Serial.println("Failed to open file");
+    disp_error_msg("TC Error", "Can't setup file system.", "Make sure files are uploaded.");
   }
 
   // Read and process each line of the file
@@ -183,7 +168,7 @@ void readCSV(const char* filePath, std::vector<TC_TABLE>&TABLE ) {
   }
     // Close the file
   file.close();
-  Serial.printf("Succesfully read %s file\n", filePath);
+  // Serial.printf("Succesfully read %s file\n", filePath);
 }
 
 // Function to find the closest temperature for a given voltage
