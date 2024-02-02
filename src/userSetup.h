@@ -4,7 +4,7 @@
 #include <Arduino.h>
 
 // Setup user variables (CHANGE THESE TO MATCH YOUR SETUP)
-const int tempCycle = 2500;              // Temperature reading cycle
+const int tempCycle = 500;              // Temperature reading cycle
 const int maxTemp = 1300;                // Maximum temperature (degrees).  If reached, will shut down.
 const int heatingCycle = 2500;           // Time for a complete PID on/off cycle for the heating elements (ms)
 inline double Kp = 800;                  // PID proportional gain

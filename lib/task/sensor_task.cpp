@@ -42,6 +42,7 @@ namespace{
   std::vector<TC_TABLE> table;
 }
 
+void check_faults();
 void setupThermocouple(ADS1220_WE& ads);
 void readTemps(ADS1220_WE& ads);
 void readCSV(const char* filePath,std::vector<TC_TABLE>& table );  
@@ -65,16 +66,16 @@ void sensor_task(void *pvParameter) {
 
 void readTemps(ADS1220_WE& ads) {
   while (1) {
+    check_faults();
+
     ads.enableTemperatureSensor(true);
     ambTemp = ads.getTemperature();
     ads.enableTemperatureSensor(false); 
     // Serial.printf("\n Cold junction temp: %f degC\n", ambTemp);
 
     V_TC = ads.getVoltage_mV(); // get result in millivolts
-    // Serial.printf("Differential voltage: %.2f mV\n", V_TC);
+    Serial.printf("Differential voltage: %.2f mV\n", V_TC);
     
-    if (V_TC > table[table.size() - 1].milliVolts) fault = true;
-
     // Magic algorithm
     // unsigned long t = micros();
     V_CJ = findClosestVoltage(ambTemp, table); // find voltage compensation
@@ -91,14 +92,13 @@ void readTemps(ADS1220_WE& ads) {
 
     // if there's an error
     if (isnan(temp) || fault) {
-      disp_error_msg("Thermocouple Error", "Failed to read TC", "System was shut down");
-      controller.shutDown();
+      disp_error_msg("Thermocouple Error", "System was shut down", "Press RESET to restart.");
 
       if (digitalRead(rstPin) == LOW) {
         esp_restart();
       }
 
-      delay(250);
+      delay(1000);
     } 
     else {
       break;  // Exit loop if temperature read successfully
@@ -120,6 +120,15 @@ void readTemps(ADS1220_WE& ads) {
   }
 }
 
+void check_faults() {
+  if (V_TC > table[table.size() - 1].milliVolts) fault = true;
+  else fault = false;
+
+  xSemaphoreTake(mutex, portMAX_DELAY);  //Take semaphore
+  g_fault = fault;
+  xSemaphoreGive(mutex);  // Release the semaphore
+}
+
 void setupThermocouple(ADS1220_WE& ads) {  
   // begin ADS
   while (!ads.init()) {
@@ -129,7 +138,7 @@ void setupThermocouple(ADS1220_WE& ads) {
   }
 
   ads.setCompareChannels(ADS1220_MUX_0_1);
-  ads.setGain(ADS1220_GAIN_128);
+  ads.setGain(ADS1220_GAIN_8);
 
   // setup thermocouple type for LUT
   if (TCTYPE == "R") {
@@ -149,7 +158,6 @@ void readCSV(const char* filePath, std::vector<TC_TABLE>&TABLE ) {
   fs::File file = SPIFFS.open(filePath, "r");
 
   if (!file) {
-    // Serial.println("Failed to open file");
     disp_error_msg("TC Error", "Can't setup file system.", "Make sure files are uploaded.");
   }
 

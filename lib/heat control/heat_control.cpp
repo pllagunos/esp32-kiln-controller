@@ -22,6 +22,7 @@ void heat_control::run() {
   // Synchonize shared task variables
   xSemaphoreTake(mutex, portMAX_DELAY);  // Wait for the semaphore to become available
   pidInput = g_pidInput;
+  fault = g_fault;
   g_pidOutput = pidOutput;
   g_pidSetPoint = pidSetPoint;
   g_segNum = segNum;
@@ -59,10 +60,18 @@ void heat_control::shutDown() {
 
 // SAFETYCHECK: CHECK IF TEMP IS TOO HIGH
 void heat_control::safetyCheck() {
+  if (fault) {
+    shutDown();
+    while (fault) {
+      if (digitalRead(rstPin) == LOW)
+        esp_restart();
+    }
+  }
+
   if (pidInput >= maxTemp) {
+    shutDown();
     disp_error_msg("MAX TEMP REACHED", "System was shut down.",
                   "Press RESET to restart.");
-    shutDown();
     while (1) {
       if (digitalRead(rstPin) == LOW)
         esp_restart();

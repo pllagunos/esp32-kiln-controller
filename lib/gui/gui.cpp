@@ -47,11 +47,6 @@ namespace {
   unsigned long topBar_start;  // Time to start top bar refresh
 }
 
-// global variables
-// extern int action;
-// extern bool captive_mode;
-// extern bool receivedCredentials;
-
 Preferences preferences; // For saving settings
 TFT_eSPI tft = TFT_eSPI();
 
@@ -73,12 +68,15 @@ void gui_start() {
 
 void gui_run() {
 
+  xSemaphoreTake(disp_mutex, portMAX_DELAY);  
+
   disp_top_bar();
 
   if (controller.getSegNum() == 0) gui_idle();
 
   if (controller.getSegNum() >= 1) gui_firing();
   
+  xSemaphoreGive(disp_mutex);
 }
 
 void gui_idle() {
@@ -630,6 +628,7 @@ void disp_connecting() {
 
 //  DISPLAYERRORMESSAGE: PRINT AN ERROR ON TFT
 void disp_error_msg(char *title, char *message1, char *message2) {
+  xSemaphoreTake(disp_mutex, portMAX_DELAY);  // take semaphore
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_RED, TFT_BLACK);
   tft.setTextSize(4);
@@ -639,6 +638,7 @@ void disp_error_msg(char *title, char *message1, char *message2) {
   tftPrintCenterWidth(title, 150);
   tftPrintCenterWidth(message1, 180);
   tftPrintCenterWidth(message2, 210);
+  xSemaphoreGive(disp_mutex);
 }
 
 // disp_program_error: show program error on TFT

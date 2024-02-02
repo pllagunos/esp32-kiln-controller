@@ -19,10 +19,12 @@ double g_pidSetPoint;
 int g_segNum;
 bool g_connected;
 bool g_published;
+bool g_fault;
 
 // External objects initialization
 FiringProgram currentProgram;
 SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
+SemaphoreHandle_t disp_mutex = xSemaphoreCreateMutex();
 heat_control controller(mutex);
 Network network(mutex, SPIFFS);
 

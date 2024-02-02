@@ -57,7 +57,8 @@ private:
   bool isOnHold;
   bool doorClosed;
   bool doorClosed_before;
-
+  bool fault;
+  
   PID pidCont;
 };
 
