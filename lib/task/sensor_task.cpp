@@ -74,7 +74,7 @@ void readTemps(ADS1220_WE& ads) {
     // Serial.printf("\n Cold junction temp: %f degC\n", ambTemp);
 
     V_TC = ads.getVoltage_mV(); // get result in millivolts
-    Serial.printf("Differential voltage: %.2f mV\n", V_TC);
+    // Serial.printf("Differential voltage: %f mV\n", V_TC);
     
     // Magic algorithm
     // unsigned long t = micros();
@@ -92,7 +92,7 @@ void readTemps(ADS1220_WE& ads) {
 
     // if there's an error
     if (isnan(temp) || fault) {
-      disp_error_msg("Thermocouple Error", "System was shut down", "Press RESET to restart.");
+      disp_error_msg("Thermocouple Error", "System was shut down", "Press RESET to restart");
 
       if (digitalRead(rstPin) == LOW) {
         esp_restart();
@@ -138,7 +138,7 @@ void setupThermocouple(ADS1220_WE& ads) {
   }
 
   ads.setCompareChannels(ADS1220_MUX_0_1);
-  ads.setGain(ADS1220_GAIN_8);
+  ads.setGain(ADS1220_GAIN_32);
 
   // setup thermocouple type for LUT
   if (TCTYPE == "R") {

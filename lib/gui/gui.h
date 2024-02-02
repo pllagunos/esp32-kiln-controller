@@ -19,13 +19,13 @@ void runningScreen();
 void disp_top_bar();
 // void drawTopBar(int8_t quality, bool published, bool connected);
 void disp_program();
-void disp_error_msg(char* title, char* message1, char* message2);
+void disp_error_msg(String title, String message1, String message2);
 void disp_program_error();
 void disp_connecting();
 
 void goToIntroScreen();
-void tftPrintCenterWidth(char* text, int y);
-void tftPrint(char* text, int x, int y);
+void tftPrintCenterWidth(String text, int y);
+void tftPrint(String text, int x, int y);
 void readButtons();
 void btnBounce(int btnPin);
 void resetTFT();

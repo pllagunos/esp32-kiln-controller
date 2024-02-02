@@ -46,12 +46,12 @@ void Network::initWiFi() {
 
 // Returns WiFi connection status and updates global variable
 bool Network::checkWiFi() {
-
-  if (captive_mode) {
-    return false;
-  }
+  bool connected;
   
-  bool connected = (wifiMulti.run() == WL_CONNECTED);
+  if (captive_mode) {
+    connected = false;
+  }
+  else connected = (wifiMulti.run() == WL_CONNECTED);
 
   xSemaphoreTake(mutex, portMAX_DELAY);
   g_connected = connected;

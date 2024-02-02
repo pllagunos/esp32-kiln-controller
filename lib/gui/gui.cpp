@@ -27,7 +27,7 @@ static const char *TAG = "gui";
 
 // local variables
 namespace {
-  char *screen = "intro";      // Variable that holds screen type (start with intro)
+  String screen = "intro";      // Variable that holds screen type (start with intro)
   bool upPressed = false;      // Up button press state
   bool selectPressed = false;  // Select button press state
   bool downPressed = false;    // Down button press state
@@ -161,7 +161,7 @@ void gui_idle() {
 
   // **************************
   // Settings screens
-  if (strstr(screen, "settings") != NULL) {
+  if ( screen.startsWith("settings") ) {
 
     int settings_options;
     settings_options = 4; // (select program, action, config, done)
@@ -377,10 +377,10 @@ void goToIntroScreen() {
 
 //  SETTINGSSCREEN: UPDATE TFT WITH SETTINGS MENU
 void settingsScreen(int sel) {
-  char* option1 = "  SELECT PROGRAM  ";
-  char* option2 = "  ACTION  ";
-  char* option3 = "  CONFIG  ";
-  char* option4 = "  DONE  ";
+  String option1 = "  SELECT PROGRAM  ";
+  String option2 = "  ACTION  ";
+  String option3 = "  CONFIG  ";
+  String option4 = "  DONE  ";
 
   switch (sel) {
     case 1:
@@ -405,14 +405,14 @@ void settingsScreen(int sel) {
   tftPrintCenterWidth(option2, 130);
   tftPrintCenterWidth(option3, 160);
   tft.setCursor(220, 200);
-  tft.print(F(option4));
+  tft.print(option4);
 }
 
 //  actionScreen: DISPLAYS ACTION MODE
 void actionScreen(int actionSel) {
-  char* text1 = "  X  ";
-  char* text2 = "  Y  ";
-  char* text3 = "  DONE  ";
+  String text1 = "  X  ";
+  String text2 = "  Y  ";
+  String text3 = "  DONE  ";
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
@@ -447,7 +447,8 @@ void actionScreen(int actionSel) {
 
 //  actionScreen: DISPLAYS ACTION MODE
 void configScreen(int configSel) {
-  char* text1;
+  String text1;
+  String text2 = "  DONE  ";
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
@@ -461,7 +462,6 @@ void configScreen(int configSel) {
     text1 =  "  STOP CAPTIVE PORTAL   ";
     tft.setTextColor(TFT_RED, TFT_BLACK);  
   }
-  char* text2 = "  DONE  ";
 
   switch (configSel) {
     case 1:
@@ -523,10 +523,10 @@ void runningScreen() {
   // Tools screen
   if (screenNum == 3) {
     tftPrintCenterWidth("TOOLS:", 30);
-    char* option1 = "  Add 5 min  ";
-    char* option2 = "  Increase 5 deg  ";
-    char* option3 = "  Skip to next segment  ";
-    char* option4 = "  Equal SV and PV  ";
+    String option1 = "  Add 5 min  ";
+    String option2 = "  Increase 5 deg  ";
+    String option3 = "  Skip to next segment  ";
+    String option4 = "  Equal SV and PV  ";
     switch (optionNum) {
       case 1:
         option1 = "> Add 5 min <";
@@ -627,7 +627,7 @@ void disp_connecting() {
 }
 
 //  DISPLAYERRORMESSAGE: PRINT AN ERROR ON TFT
-void disp_error_msg(char *title, char *message1, char *message2) {
+void disp_error_msg(String title, String message1, String message2) {
   xSemaphoreTake(disp_mutex, portMAX_DELAY);  // take semaphore
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_RED, TFT_BLACK);
@@ -660,15 +660,15 @@ void resetTFT() {
 }
 
 //  TFTPRINTCENTERWIDTH: CENTERS CURSOR ON WIDTH AND PRINTS
-void tftPrintCenterWidth(char *text, int y) {
+void tftPrintCenterWidth(String text, int y) {
   tft.setCursor((tftwidth - tft.textWidth(text)) / 2, y);
-  tft.print(F(text));
+  tft.print(text);
 }
 
 //  TFTPRINT: SETS CURSOR ON (X,Y) AND PRINTS
-void tftPrint(char *text, int x, int y) {
+void tftPrint(String text, int x, int y) {
   tft.setCursor(x, y);
-  tft.print(F(text));
+  tft.print(text);
 }
 
 //  READBUTTONS: READ IF BUTTONS ARE PRESSED
