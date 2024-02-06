@@ -69,9 +69,9 @@ void database_task(void *parameter) {
     // if we get to here, try publishing!
     sensor.clearFields();
     xSemaphoreTake(mutex, portMAX_DELAY); // Take the semaphore
-    sensor.addField("Kiln temperature", (int)g_pidInput);
-    sensor.addField("SetPoint", (int)g_pidSetPoint);
-    sensor.addField("Output", (int)g_pidOutput);
+    sensor.addField("Kiln temperature", g_pidInput);
+    sensor.addField("SetPoint", g_pidSetPoint);
+    sensor.addField("Output", g_pidOutput);
     sensor.addField("Running", (g_segNum > 0));
     xSemaphoreGive(mutex); // Release the semaphore
 
