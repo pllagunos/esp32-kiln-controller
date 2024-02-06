@@ -11,13 +11,13 @@ void gui_firing();
 void openProgram();
 
 void introScreen(int sel);
+void modeScreen(int modeSel);
 void settingsScreen(int sel);
 void actionScreen(int actionSel);
 void configScreen(int configSel);
 void runningScreen();
 
 void disp_top_bar();
-// void drawTopBar(int8_t quality, bool published, bool connected);
 void disp_program();
 void disp_error_msg(String title, String message1, String message2);
 void disp_program_error();
@@ -27,7 +27,8 @@ void goToIntroScreen();
 void tftPrintCenterWidth(String text, int y);
 void tftPrint(String text, int x, int y);
 void readButtons();
-void btnBounce(int btnPin);
+void updateButtonState(int buttonPin, bool &buttonPressedFlag, int index);
+// void btnBounce(int btnPin);
 void resetTFT();
 
 #endif

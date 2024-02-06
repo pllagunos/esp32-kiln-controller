@@ -23,7 +23,8 @@ public:
 
   void setSegNum(int value);
   int getSegNum() const;
-
+  void setMode(FiringModes mode);
+  void setSetPoint(int value);
   double getPV();
   double getSP();
   void setLastTemp();
@@ -40,6 +41,7 @@ private:
   void updatePIDs();
   void updateSeg();
 
+  FiringModes firingMode;
   unsigned long heatStart;
   unsigned long rampStart;
   unsigned long holdStart;
@@ -51,6 +53,7 @@ private:
   double lastRampHours;
   double holdMins;
   double lastHoldMins;
+  int manualSetPoint;
   int segQuantity;
   int lastTemp;
   int segNum;

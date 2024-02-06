@@ -19,6 +19,11 @@ struct FiringProgram {
   int segmentQuantity;
 };
 
+enum class FiringModes {
+  automatic,
+  manual
+};
+
 extern FiringProgram currentProgram; // Current firing program loaded into memory
 extern SemaphoreHandle_t mutex;      // For thread safety
 extern SemaphoreHandle_t disp_mutex; // For display calls

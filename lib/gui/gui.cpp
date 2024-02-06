@@ -27,14 +27,17 @@ static const char *TAG = "gui";
 
 // local variables
 namespace {
-  String screen = "intro";      // Variable that holds screen type (start with intro)
+  String screen = "intro";     // Variable that holds screen type (start with intro)
+  FiringModes firingMode;      // Auto or manual mode (0,1) 
   bool upPressed = false;      // Up button press state
   bool selectPressed = false;  // Select button press state
   bool downPressed = false;    // Down button press state
   bool programOK;              // Is the program loaded correctly?
   bool fileExists = true;      // Assume file exists initially 
+  bool adjustingSV = false;    // Flag to know if SV is being adjusted
 
   int introSel = 1;            // Intro menu selected option (start or settings)
+  int modeSel = 1;             // 1 is AUTOMATIC, 2 is MANUAL
   int confirmSel;              // Confirm selected option (back or OK)
   int settingsSel = 1;         // Settings menu selected setting
   int actionSel = 1;           // Option selected from action screen
@@ -43,8 +46,23 @@ namespace {
   int optionNum = 1;           // Option selected from screen #3
   int programNumber;           // Current firing program number.  This ties to the file name
   int action;                  // Action methods (what for?)
-  
+  int tempSV;
+
   unsigned long topBar_start;  // Time to start top bar refresh
+  
+  enum btnIndex {
+    upBtn,
+    selectBtn,
+    downBtn
+  };
+
+  struct btnState {
+    bool isPressed;
+    unsigned long pressStartTime;
+    int adjustStep = 1;
+  };
+
+  btnState buttonStates[3];
 }
 
 Preferences preferences; // For saving settings
@@ -63,6 +81,8 @@ void gui_start() {
   // setup and retrieve data from EEPROM
   preferences.begin("my-app", false);
   programNumber = preferences.getInt("programNumber", 1);
+  firingMode = static_cast<FiringModes>(preferences.getInt("firingMode", static_cast<int>(FiringModes::automatic))); 
+  tempSV = preferences.getInt("tempSV", 25);
   action = preferences.getInt("action", 0); // 0 = X
 }
 
@@ -102,20 +122,27 @@ void gui_idle() {
 
     /* User pressed START */
     if (selectPressed && introSel == 1) {
-      // shift_register.set(gasPin, HIGH);  // allow gas contactor to be
-      // manually energized
-      screen = "confirm"; // go to confirm screen
-      confirmSel = 2;     // set selection to OK
+      // shift_register.set(gasPin, HIGH);  // allow gas contactor to be manually energized
+      if (firingMode == FiringModes::automatic) {
+        screen = "confirm"; // go to confirm screen
+        confirmSel = 2;     // set selection to OK
 
-      tft.fillRect(0, 20, 320, 240 - 20,
-                   TFT_BLACK); // clear screen except top notch
-      tft.setTextSize(2);
-      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK); // clear screen except top notch
+        tft.setTextSize(2);
+        tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
-      tftPrint("  BACK  ", 10, 200);
-      tftPrint("> OK <", 200, 200);
+        tftPrint("  BACK  ", 10, 200);
+        tftPrint("> OK <", 200, 200);
 
-      openProgram();
+        openProgram();
+      }
+      // no confirm screen for manual mode
+      else {
+        controller.setMode(firingMode);
+        controller.setSegNum(1);    // firing
+        controller.setupPIDs(HIGH); // setup PID algorithm
+        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK); // clear screen except top notch
+      }
     }
   }
 
@@ -147,15 +174,18 @@ void gui_idle() {
     }
 
     // pressed OK
-    if (selectPressed && confirmSel == 2 && programOK) {
-      controller.setSegNum(1);    // firing
-      controller.setupPIDs(HIGH); // setup PID algorithm
-      controller.setLastTemp();
-      controller.setHeatStart(millis());
-      controller.setRampStart(millis());
-      controller.setProgramStart(millis()); // use later to know run duration
-      tft.fillRect(0, 20, 320, 240 - 20,
-                   TFT_BLACK); // clear screen except top notch
+    if (selectPressed && confirmSel == 2) {
+      if (firingMode == FiringModes::automatic && programOK) {
+        controller.setMode(firingMode);
+        controller.setSegNum(1);    // firing
+        controller.setupPIDs(HIGH); // setup PID algorithm
+        controller.setLastTemp();
+        controller.setHeatStart(millis());
+        controller.setRampStart(millis());
+        controller.setProgramStart(millis()); // use later to know run duration
+
+        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK); // clear screen except top notch
+      }
     }
   }
 
@@ -164,7 +194,7 @@ void gui_idle() {
   if ( screen.startsWith("settings") ) {
 
     int settings_options;
-    settings_options = 4; // (select program, action, config, done)
+    settings_options = 4; // (select mode, select program, config, done)
 
     // Main settings screen
     if (screen == "settings") {
@@ -180,14 +210,14 @@ void gui_idle() {
       if (selectPressed)
         tft.fillRect(0, 20, 320, 240 - 20,
                      TFT_BLACK); // clear display except top notch
-      // user pressed SELECT PROGRAM
+      // user pressed SELECT MODE
       if (selectPressed && settingsSel == 1) {
-        screen = "settings_program";
+        screen = "settings_mode";
+        modeSel = 1;
       }
-      // user pressed ACTION
+      // user pressed SELECT PROGRAM
       if (selectPressed && settingsSel == 2) {
-        screen = "settings_action";
-        actionSel = 1;
+        screen = "settings_program";
       }
       // user pressed DONE
       if (selectPressed && settingsSel == 3) {
@@ -198,6 +228,32 @@ void gui_idle() {
       if (selectPressed && settingsSel == 4) {
         screen = "intro";
         introSel = 1;
+      }
+    }
+
+    // Select mode screen
+    if (screen == "settings_mode") {
+      modeScreen(modeSel);
+      readButtons();
+      if (upPressed && modeSel > 1) {
+        modeSel -= 1;
+      }
+      if (downPressed && modeSel < 2) {
+        modeSel += 1;
+      }
+      if (selectPressed) {
+        const char* Mode;
+        if (modeSel == 1) {
+          firingMode = static_cast<FiringModes>(preferences.putInt("firingMode", static_cast<int>(FiringModes::automatic))); 
+        }
+        if (modeSel == 2) {
+          firingMode = static_cast<FiringModes>(preferences.putInt("firingMode", static_cast<int>(FiringModes::manual))); 
+        }
+        // update variable (idk why but yea)
+        firingMode = static_cast<FiringModes>(preferences.getInt("firingMode", static_cast<int>(FiringModes::automatic))); 
+        screen = "settings";
+        settingsSel = 1;
+        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK); // clear screen except top notch
       }
     }
 
@@ -291,59 +347,93 @@ void gui_firing() {
   
   readButtons();
   runningScreen();
-  
-  int segNum = controller.getSegNum();
-  int segQuantity = currentProgram.segmentQuantity;
 
-  // Up arrow button
-  if (upPressed) {
-  if (screenNum == 1) {
-      controller.setSegNum(segQuantity + 2); // go to end of program
+  if (firingMode == FiringModes:: automatic) {    
+    int segNum = controller.getSegNum();
+    int segQuantity = currentProgram.segmentQuantity;
+
+    // Up arrow button
+    if (upPressed) {
+    if (screenNum == 1) {
+        controller.setSegNum(segQuantity + 2); // go to end of program
+        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
+    }
+    if (screenNum == 2 || (screenNum == 3 && optionNum == 1)) {
+        screenNum = screenNum - 1;
+        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
+    } else if (screenNum == 3 && optionNum >= 2) {
+        optionNum = optionNum - 1;
+    }
+    }
+    // Down arrow button
+    if (downPressed) {
+    if (screenNum <= 2) {
+        screenNum = screenNum + 1;
+        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
+    } else if (screenNum == 3 && optionNum <= 3) {
+        optionNum = optionNum + 1;
+    }
+    }
+    // Select / Start button
+    if (selectPressed && screenNum == 3) {
+      // Add 5 min
+      if (optionNum == 1) {  
+          currentProgram.segments[segNum - 1].holdingTime = currentProgram.segments[segNum - 1].holdingTime + 5;
+          optionNum = 1;
+          screenNum = 2;
+      }
+      // Add 5 deg
+      if (optionNum == 2) {  
+          currentProgram.segments[segNum - 1].targetTemperature = currentProgram.segments[segNum - 1].targetTemperature + 5;
+          optionNum = 1;
+          screenNum = 1;
+      }
+      // Goto next segment
+      if (optionNum == 3) {  
+          segNum = segNum + 1;
+          optionNum = 1;
+          screenNum = 2;
+      }
+      // SP = PV + required PID adjustment  
+      if (optionNum == 4) {  
+          controller.SPequalPV();
+          optionNum = 1;
+          screenNum = 1;
+      }
       tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-  }
-  if (screenNum == 2 || (screenNum == 3 && optionNum == 1)) {
-      screenNum = screenNum - 1;
-      tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-  } else if (screenNum == 3 && optionNum >= 2) {
-      optionNum = optionNum - 1;
-  }
-  }
-  // Down arrow button
-  if (downPressed) {
-  if (screenNum <= 2) {
-      screenNum = screenNum + 1;
-      tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
-  } else if (screenNum == 3 && optionNum <= 3) {
-      optionNum = optionNum + 1;
-  }
-  }
-  // Select / Start button
-  if (selectPressed && screenNum == 3) {
-  if (optionNum == 1) {  // Add 5 min
-      currentProgram.segments[segNum - 1].holdingTime = currentProgram.segments[segNum - 1].holdingTime + 5;
-      optionNum = 1;
-      screenNum = 2;
+    }
   }
 
-  if (optionNum == 2) {  // Add 5 deg
-      currentProgram.segments[segNum - 1].targetTemperature = currentProgram.segments[segNum - 1].targetTemperature + 5;
-      optionNum = 1;
-      screenNum = 1;
-  }
+  if (firingMode == FiringModes:: manual) {
+    
+    if (upPressed && !adjustingSV) {
+      controller.setSegNum(0); // exit firing
+      controller.shutDown();
+      goToIntroScreen();
+    }
 
-  if (optionNum == 3) {  // Goto next segment
-      segNum = segNum + 1;
-      optionNum = 1;
-      screenNum = 2;
-  }
+    if (selectPressed) {
+      // save SV if user is finished adjusting it
+      if (adjustingSV) {
+        tempSV = preferences.putInt("tempSV", tempSV);
+        tempSV = preferences.getInt("tempSV", tempSV);
+        controller.setSetPoint(tempSV);
+      }
 
-  if (optionNum == 4) {  // SP = PV + required PID adjustment
-      controller.SPequalPV();
-      optionNum = 1;
-      screenNum = 1;
-  }
+      adjustingSV = !adjustingSV; // Toggle adjustment state
+      selectPressed = false; // Reset flag to prevent continuous toggling
+    }
+    
+    // Adjust SV if in adjustment state and up/down pressed
+    if (adjustingSV) {
+      if (upPressed) {
+        tempSV += buttonStates[upBtn].adjustStep; 
+      } 
+      else if (downPressed) {
+        tempSV -= buttonStates[downBtn].adjustStep; 
+      }
+    }
 
-  tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);  // clear screen except top notch
   }
 }
 
@@ -377,17 +467,17 @@ void goToIntroScreen() {
 
 //  SETTINGSSCREEN: UPDATE TFT WITH SETTINGS MENU
 void settingsScreen(int sel) {
-  String option1 = "  SELECT PROGRAM  ";
-  String option2 = "  ACTION  ";
+  String option1 = "  SELECT MODE  ";
+  String option2 = "  SELECT PROGRAM  ";
   String option3 = "  CONFIG  ";
   String option4 = "  DONE  ";
 
   switch (sel) {
     case 1:
-      option1 = "> SELECT PROGRAM <";
+      option1 = "> SELECT MODE <";
       break;
     case 2:
-      option2 = "> ACTION <";
+      option2 = "> SELECT PROGRAM <";
       break;
     case 3:
       option3 = "> CONFIG <";
@@ -406,6 +496,24 @@ void settingsScreen(int sel) {
   tftPrintCenterWidth(option3, 160);
   tft.setCursor(220, 200);
   tft.print(option4);
+}
+
+//  modeScreen: UPDATE TFT WHEN SELECTING FIRING MODE
+void modeScreen(int sel) {
+  tft.setTextColor(TFT_WHITE, TFT_BLACK); 
+  tft.setTextSize(3);
+  tftPrintCenterWidth("SELECT MODE", 40);
+  tft.setTextSize(2);
+  switch (sel) {
+    case 1:
+      tftPrintCenterWidth("> AUTOMATIC <", 100);
+      tftPrintCenterWidth("  MANUAL  ", 140);
+      break;
+    case 2:
+      tftPrintCenterWidth("  AUTOMATIC  ", 100);
+      tftPrintCenterWidth("> MANUAL <", 140);
+      break;
+  }
 }
 
 //  actionScreen: DISPLAYS ACTION MODE
@@ -482,69 +590,106 @@ void configScreen(int configSel) {
 
 //  RUNNINGSCREEN: UPDATE TFT WITH RUNNING SCREEN
 void runningScreen() {
-  int segNum = controller.getSegNum();
-  bool isOnHold = controller.getIsOnHold();
-  double holdMins = controller.getHoldMins();
 
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
+  if (firingMode == FiringModes::automatic) {
+    int segNum = controller.getSegNum();
+    bool isOnHold = controller.getIsOnHold();
+    double holdMins = controller.getHoldMins();
 
-  // Operator screen (temperature)
-  if (screenNum == 1) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextSize(2);
+
+    // Operator screen (temperature)
+    if (screenNum == 1) {
+      tft.setCursor(10, 30);
+      tft.print(F("pv"));
+      tft.setCursor(10, 140);
+      tft.print(F("sv"));
+
+      tft.setTextSize(8);
+      tft.setCursor(60, 60);
+      tft.printf("%04d%c", (int)controller.getPV(), tempScale);
+      tft.setCursor(60, 160);
+      tft.printf("%04d%c", (int)controller.getSP(), tempScale);
+    }
+    // Info screen
+    if (screenNum == 2) {
+      tft.setCursor(0, 40);
+      tft.printf("PROGRAM %i: \n\n%s", programNumber, currentProgram.name.c_str());
+      tft.setCursor(0, 120);
+      tft.printf("SEGMENT: %i/%i", segNum, currentProgram.segmentQuantity);
+      if (isOnHold == 0) {
+        tft.setCursor(160, 150);
+        tft.printf("Ramp to %i%c", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
+        tft.setCursor(160, 170);
+        tft.printf("at %i%c/hr", currentProgram.segments[segNum - 1].firingRate, tempScale);
+      } else {
+        tft.setCursor(160, 150);
+        tft.printf("Hold at %i%c \n", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
+        tft.setCursor(160, 170);
+        tft.printf("for %.0f / %i min", holdMins, currentProgram.segments[segNum-1].holdingTime);
+      }
+    }
+    // Tools screen
+    if (screenNum == 3) {
+      tftPrintCenterWidth("TOOLS:", 30);
+      String option1 = "  Add 5 min  ";
+      String option2 = "  Increase 5 deg  ";
+      String option3 = "  Skip to next segment  ";
+      String option4 = "  Equal SV and PV  ";
+      switch (optionNum) {
+        case 1:
+          option1 = "> Add 5 min <";
+          break;
+        case 2:
+          option2 = "> Increase 5 deg <";
+          break;
+        case 3:
+          option3 = "> Skip to next segment <";
+          break;
+        case 4:
+          option4 = "> Equal SV and PV <";
+          break;
+      }
+      tftPrintCenterWidth(option1, 80);
+      tftPrintCenterWidth(option2, 100);
+      tftPrintCenterWidth(option3, 120);
+      tftPrintCenterWidth(option4, 140);
+    }
+  }
+
+  if (firingMode == FiringModes::manual) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextSize(2);
+    
     tft.setCursor(10, 30);
     tft.print(F("pv"));
-    tft.setCursor(10, 140);
+    tft.setCursor(10, 130);
     tft.print(F("sv"));
-    tft.setCursor(60, 160);
+
     tft.setTextSize(8);
-    tft.printf("%04d%c", (int)controller.getSP(), tempScale);
-    tft.setCursor(60, 60);
-    tft.setTextSize(8);
+    tft.setCursor(60, 40);
     tft.printf("%04d%c", (int)controller.getPV(), tempScale);
-  }
-  // Info screen
-  if (screenNum == 2) {
-    tft.setCursor(0, 40);
-    tft.printf("PROGRAM %i: \n\n%s", programNumber, currentProgram.name.c_str());
-    tft.setCursor(0, 120);
-    tft.printf("SEGMENT: %i/%i", segNum, currentProgram.segmentQuantity);
-    if (isOnHold == 0) {
-      tft.setCursor(160, 150);
-      tft.printf("Ramp to %i%c", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
-      tft.setCursor(160, 170);
-      tft.printf("at %i%c/hr", currentProgram.segments[segNum - 1].firingRate, tempScale);
+  
+    tft.setCursor(60, 140);
+    if (adjustingSV) {
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+      tft.printf("%04d%c", tempSV, tempScale);
+    }
+    else {
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      tft.printf("%04d%c", (int)controller.getSP(), tempScale);      
+    }
+
+    // Display instructions for adjusting SV if not currently adjusting
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextSize(1);
+    tft.setCursor(130, 220);
+    if (!adjustingSV) {
+      tft.print(F("Press select to change SV  "));
     } else {
-      tft.setCursor(160, 150);
-      tft.printf("Hold at %i%c \n", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
-      tft.setCursor(160, 170);
-      tft.printf("for %.0f / %i min", holdMins, currentProgram.segments[segNum-1].holdingTime);
+      tft.print(F("Press select to confirm SV "));
     }
-  }
-  // Tools screen
-  if (screenNum == 3) {
-    tftPrintCenterWidth("TOOLS:", 30);
-    String option1 = "  Add 5 min  ";
-    String option2 = "  Increase 5 deg  ";
-    String option3 = "  Skip to next segment  ";
-    String option4 = "  Equal SV and PV  ";
-    switch (optionNum) {
-      case 1:
-        option1 = "> Add 5 min <";
-        break;
-      case 2:
-        option2 = "> Increase 5 deg <";
-        break;
-      case 3:
-        option3 = "> Skip to next segment <";
-        break;
-      case 4:
-        option4 = "> Equal SV and PV <";
-        break;
-    }
-    tftPrintCenterWidth(option1, 80);
-    tftPrintCenterWidth(option2, 100);
-    tftPrintCenterWidth(option3, 120);
-    tftPrintCenterWidth(option4, 140);
   }
 }
 
@@ -558,6 +703,13 @@ void disp_top_bar() {
   tft.fillRect(0, 0, 320, 20, bar_color); // clear top notch
   tft.setTextSize(1);
 
+  // Draw program mode in top right corner
+  tft.setTextColor(TFT_GREEN, bar_color);
+  if (firingMode == FiringModes::automatic) {
+    tft.drawString("Automatic", 140, centerY, 1);
+  } else tft.drawString("Manual", 140, centerY, 1);
+
+  // Draw connection status
   xSemaphoreTake(mutex, portMAX_DELAY);
   bool connected = g_connected;
   xSemaphoreGive(mutex);
@@ -581,12 +733,11 @@ void disp_top_bar() {
     tft.drawString("OFFLINE", 270, centerY, 1);
   }
 
-  // Get published status
+  // Draw publish status
   xSemaphoreTake(mutex, portMAX_DELAY);
   bool published = g_published;
   xSemaphoreGive(mutex);
 
-  // Draw Influx check mark or cross
   if (published) {
     tft.drawLine(16, centerY + 1, 19, centerY + 4,
                  TFT_GREEN); // Draw the first diagonal line
@@ -676,26 +827,52 @@ void readButtons() {
   upPressed = false;
   selectPressed = false;
   downPressed = false;
+  
+  updateButtonState(upPin, upPressed, upBtn);
+  updateButtonState(selectPin, selectPressed, selectBtn);
+  updateButtonState(downPin, downPressed, downBtn);
 
-  if (digitalRead(upPin) == LOW) {
-    upPressed = true;
-    btnBounce(upPin);
-  }
-  if (digitalRead(selectPin) == LOW) {
-    selectPressed = true;
-    btnBounce(selectPin);
-  }
-  if (digitalRead(downPin) == LOW) {
-    downPressed = true;
-    btnBounce(downPin);
-  }
 }
 
-//  BTNBOUNCE: HOLD UNTIL BUTTON IS RELEASED.  DELAY FOR ANY BOUNCE
-void btnBounce(int btnPin) {
-  while (digitalRead(btnPin) == LOW) {
+void updateButtonState(int buttonPin, bool &buttonPressedFlag, int index) {
+  if (digitalRead(buttonPin) == LOW) {
+    if (!buttonStates[index].isPressed) {
+      // First detection of a press
+      buttonStates[index].pressStartTime = millis();
+      buttonStates[index].isPressed = true;
+      return;
+    }
+    // btn was pressed already
+    else {      
+      if (millis() - buttonStates[index].pressStartTime < 25) {
+        // duration is below press threshold
+        return;
+      }
+      // Press was deliberate, set flag to true
+      buttonPressedFlag = true;
+
+      // For select button or when not adjusting SV
+      if (!adjustingSV || buttonPin == selectPin) {
+        while (digitalRead(buttonPin) == LOW); // Wait for release
+        delay(25); //  debounce delay
+      } 
+
+      // Handle long press only for up/down when adjusting SV
+      if (buttonPin != selectPin && adjustingSV) { 
+        // Long press detection
+        int elapsed_time = millis() - buttonStates[index].pressStartTime;
+        if (elapsed_time > LONG_PRESS_TIME) {
+          buttonStates[index].adjustStep += (int)(elapsed_time / LONG_PRESS_TIME);
+        }
+      }
+
+    }
+  } 
+  // reset states after release
+  else {
+    buttonStates[index].isPressed = false;
+    buttonStates[index].adjustStep = 1; 
   }
-  delay(25);
 }
 
 //  openProgram: OPEN AND LOAD A FIRING PROGRAM FILE / DISPLAY ON SCREEN

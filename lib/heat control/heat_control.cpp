@@ -102,6 +102,14 @@ void heat_control::checkDoor() {
 
 //  UPDATEPIDS: UPDATE THE PID LOOPS
 void heat_control::updatePIDs() {
+  // Update the PID controller based on new variables 
+  pidCont.Compute();  // (internally it will only compute if sample time has been elapsed)
+
+  if (firingMode == FiringModes::manual) {
+    pidSetPoint = manualSetPoint;
+    return;
+  }
+
   static double calcSetPoint;   // Calculated set point (degrees)
 
   // If door is open, exit and save ramp time (hold time saved in updateSeg)
@@ -134,12 +142,16 @@ void heat_control::updatePIDs() {
   }
   // Set the target temp.
   pidSetPoint = calcSetPoint;
-  // Update the PID controller based on new variables
-  pidCont.Compute();  // (internally it will only compute if sample time has been elapsed)
 }
 
 //  UPDATESEG: UPDATE THE PHASE AND SEGMENT
 void heat_control::updateSeg() {
+
+  // No need to update if not in auto mode
+  if (firingMode == FiringModes::manual) {
+    return;
+  }
+
   // If door is closed, start hold phase or move to next segment (do I really want this??? what if ramp is negative, opening = cooling)
   if (doorClosed) {
     // Start the hold phase if temp is in range
@@ -198,12 +210,26 @@ void heat_control::SPequalPV() {
   Serial.printf("calculated SP = %.2f \n", TEcalcSetPoint);
 }
 
+// *****************************
+// Getter / Setter functions
+// *****************************
+
+void heat_control::setMode(FiringModes mode) {
+  firingMode = mode;
+}
+
 double heat_control::getPV() {
   return pidInput;
 }
+
 double heat_control::getSP() {
   return pidSetPoint;
 }
+
+void heat_control::setSetPoint(int value) {
+  manualSetPoint = value;
+}
+
 void heat_control::setSegNum(int value) {
   segNum = value;
 }

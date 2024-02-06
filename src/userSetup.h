@@ -15,6 +15,7 @@ const int tempRange = 2;                 // This is how close the temp reading n
 const char tempScale = 'C';              // Temperature scale.  F = Fahrenheit.  C = Celsius
 const int topBarCycle = 4000;            // Refresh rate to update top info bar on TFT (ms)
 const int maxSegments = 20;              // Maximum number of segments in a firing program
+const int LONG_PRESS_TIME = 500;         // Time in milliseconds that defines a long press
 const String TCTYPE = "S";               // Thermocouple type.  B = B-type, S = S-type, K = K-type, R = R-type, N = N-type, E = E-type, J = J-type, T = T-type   
 
 // Setup pin connections (CHANGE THESE TO MATCH YOUR SETUP)
