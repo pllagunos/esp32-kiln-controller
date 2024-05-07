@@ -219,7 +219,7 @@ void gui_idle() {
       if (selectPressed && settingsSel == 2) {
         screen = "settings_program";
       }
-      // user pressed DONE
+      // user pressed CONFIG
       if (selectPressed && settingsSel == 3) {
         screen = "settings_config";
         configSel = 1;
@@ -390,7 +390,7 @@ void gui_firing() {
       }
       // Goto next segment
       if (optionNum == 3) {  
-          segNum = segNum + 1;
+          segNum = segNum + 1; // is this setting the segNum on the controller?
           optionNum = 1;
           screenNum = 2;
       }

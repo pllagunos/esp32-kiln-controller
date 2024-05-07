@@ -4,7 +4,7 @@
 #include <Arduino.h>
 
 // Setup user variables (CHANGE THESE TO MATCH YOUR SETUP)
-const int tempCycle = 500;              // Temperature reading cycle
+const int tempCycle = 500;               // Temperature reading cycle
 const int maxTemp = 1300;                // Maximum temperature (degrees).  If reached, will shut down.
 const int heatingCycle = 2500;           // Time for a complete PID on/off cycle for the heating elements (ms)
 inline double Kp = 800;                  // PID proportional gain
@@ -23,7 +23,7 @@ const int upPin = 16;               // Pin # connected to up arrow button #1
 const int selectPin = 17;           // Pin # connected to select / start button #2
 const int downPin = 21;             // Pin # connected to down arrow button #3
 const int heaterPin = 27;           // Pin # connected to SSR of heating element.
-const int relayPin = 5; //33        // Pin # connected to main relay
+const int relayPin = 26;            // Pin # connected to main relay
 const int limitSwitchPin = 25;      // Pin # connected to safety limit switch mounted on kiln door
 const int rstPin = 22;              // Pin # connected to reset button
 const int thermocoupleCS = 33;      // Pin # connected to thermocouple chip select
