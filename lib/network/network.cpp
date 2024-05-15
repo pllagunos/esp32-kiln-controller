@@ -9,14 +9,64 @@ Network::Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem)
 // WiFi related functions
 //******************************************************************************************************************************
 
-// Initializes WiFi connection
-void Network::initWiFi() {
+// Checks WiFi connection, connects and updates global variable
+bool Network::checkWiFi() {
+  static bool firstConnection = true; 
+  bool connected = false;
+  
+  if (!captive_mode)
+  {
+    if (receivedCredentials) {
+      Serial.println("Credentials changed. Initializing WiFi again.");
+      receivedCredentials = false;
+      loadWifiCredentials();
+    }
+
+    // Attempt WiFi connection
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    g_connecting = true;
+    xSemaphoreGive(mutex);
+    
+    for (uint8_t attempt = 0; attempt < 3; attempt++) {
+      if (wifiMulti.run() != WL_CONNECTED) {
+        Serial.print(".");
+        firstConnection = true;
+        delay(300);
+      } 
+      else {
+        connected = true;
+        if (firstConnection) {
+          firstConnection = false;
+          Serial.printf("Connected to: %s\nIP address: %s\n", WiFi.SSID(), WiFi.localIP().toString().c_str());
+        }
+        break;
+      }
+    }
+
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    g_connecting = false;
+    xSemaphoreGive(mutex);
+  }
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  g_connected = connected;
+  xSemaphoreGive(mutex);
+
+  return connected;
+}
+
+// loadWifiCredentials() - loads WiFi credentials from JSON array to wifiMulti
+void Network::loadWifiCredentials() {
+  WiFi.mode(WIFI_STA);
+
+  // Clear existing WiFiMulti access points
+  wifiMulti.~WiFiMulti(); // Call the destructor to clear the internal list
+  new (&wifiMulti) WiFiMulti(); // Reconstruct the WiFiMulti object
+
   // Read WiFi credentials from JSON file
   StaticJsonDocument<2048> json;
   parseJson(json, "/wifi_credentials.json");
-
-  WiFi.mode(WIFI_STA);
-
+  
   // Loop through each credential set
   JsonArray array = json.as<JsonArray>();
   for (JsonObject cred : array) {
@@ -24,40 +74,6 @@ void Network::initWiFi() {
     const char* password = cred["password"];
     wifiMulti.addAP(ssid, password);
   }
-
-  // Display connecting message 
-  disp_connecting();
-
-  // try connecting
-  int attempts = 0;
-  while (attempts < 2) {
-    attempts++;
-    if (wifiMulti.run() != WL_CONNECTED) {
-      delay(300);
-    } else {
-      Serial.println("IP address: "); // Print local IP address
-      Serial.println(WiFi.localIP());
-      Serial.print("Connected to:\t");
-      Serial.println(WiFi.SSID());
-      return;
-    }
-  }
-}
-
-// Returns WiFi connection status and updates global variable
-bool Network::checkWiFi() {
-  bool connected;
-  
-  if (captive_mode) {
-    connected = false;
-  }
-  else connected = (wifiMulti.run() == WL_CONNECTED);
-
-  xSemaphoreTake(mutex, portMAX_DELAY);
-  g_connected = connected;
-  xSemaphoreGive(mutex);
-
-  return connected;
 }
 
 //  getWifiQuality() - Returns the WiFi quality in percentage
@@ -92,12 +108,6 @@ void Network::setupServer() {
   server.on("/exit", HTTP_GET, [this](AsyncWebServerRequest* request) {
     // request->send(200, "text/plain", "Exiting captive mode");
     server.end();
-    if (receivedCredentials) {
-      Serial.println("(exit) Credentials changed. Initializing WiFi again.");
-      receivedCredentials = false;
-      delay(2000);
-      initWiFi();
-    }
     captive_mode = false;
   });
 
@@ -298,22 +308,36 @@ void Network::addWifiCredentials(const String& ssid, const String& password) {
   String fileName = "/wifi_credentials.json";
   parseJson(json, fileName);
 
-  // Append new credentials to the array
-  JsonObject newCred = json.createNestedObject();
-  newCred["ssid"] = ssid;
-  newCred["password"] = password;
+  // Check if the SSID already exists in the JSON array and update the password if it does
+  bool ssidFound = false;
+  JsonArray array = json.as<JsonArray>();
+  for (JsonObject cred : array) {
+    if (cred["ssid"].as<String>() == ssid) {
+      cred["password"] = password;  // Update password
+      ssidFound = true;
+      Serial.println("Updated existing credentials");
+      break;
+    }
+  }
+
+  // If SSID not found, append new credentials
+  if (!ssidFound) {
+    JsonObject newCred = json.createNestedObject();
+    newCred["ssid"] = ssid;
+    newCred["password"] = password;
+    Serial.println("Added new credentials");
+  }
 
   // Save the updated credentials back to the file
   fs::File credentialsFile = fileSystem.open(fileName, FILE_WRITE);
   if (!credentialsFile) {
-    Serial.println("failed to open config file for writing");
+    Serial.println("Failed to open config file for writing");
   }
 
-  serializeJsonPretty(json, Serial);
   if (!serializeJson(json, credentialsFile)) {
     Serial.println(F("Failed to write to file"));
   }
-
+  serializeJsonPretty(json, Serial);
   Serial.println();
   credentialsFile.close();
 }
@@ -348,12 +372,6 @@ void Network::handleCaptiveModeToggle() {
   } 
   else {
     server.end();
-    if (receivedCredentials) {
-      Serial.println("(toggled) Credentials changed. Initializing WiFi again.");
-      receivedCredentials = false;
-      delay(2000);
-      initWiFi();
-    }
     captive_mode = false;
   }
 }

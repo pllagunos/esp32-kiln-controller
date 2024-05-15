@@ -176,11 +176,11 @@ void heat_control::updateSeg() {
     // Serial.printf("lastHoldMins saved. last holdMins: %.0f \n", lastHoldMins);
   }
 
-  // Check if complete / turn off all zones
-  if (segNum - 1 > segQuantity) {
+  // Check if complete -> turn off all zones
+  if (segNum > currentProgram.segmentQuantity) {
     shutDown();
-    segNum = 0;
     goToIntroScreen();
+    segNum = 0; 
   }
 }
 

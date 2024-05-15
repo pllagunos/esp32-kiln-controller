@@ -34,6 +34,7 @@ extern double g_pidOutput;           // Output for PID loop (relay for heater).
 extern double g_pidSetPoint;         // Setpoint for PID loop (temp you are trying to reach).
 extern int g_segNum;                 // Current segment number running in firing program.  0 means a program hasn't been selected yet.
 extern bool g_connected;             // Is the ESP connected to WiFi?
+extern bool g_connecting;            // Is the ESP trying to connect to WiFi
 extern bool g_published;             // Is the ESP publishing to InfluxDB?
 extern bool g_fault;                 // Is there a fault that needs to be known across threads?
 

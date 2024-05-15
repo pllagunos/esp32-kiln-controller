@@ -28,7 +28,8 @@ void tftPrintCenterWidth(String text, int y);
 void tftPrint(String text, int x, int y);
 void readButtons();
 void updateButtonState(int buttonPin, bool &buttonPressedFlag, int index);
-// void btnBounce(int btnPin);
+
 void resetTFT();
+void resetCheck();
 
 #endif

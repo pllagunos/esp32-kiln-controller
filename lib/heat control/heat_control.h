@@ -54,7 +54,7 @@ private:
   double holdMins;
   double lastHoldMins;
   int manualSetPoint;
-  int segQuantity;
+  int segQuantity; // change logic to be the same as in gas controller (no access to current program)
   int lastTemp;
   int segNum;
   bool isOnHold;

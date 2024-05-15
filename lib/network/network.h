@@ -33,13 +33,13 @@ class Network {
 public:
   Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem);
 
-  void initWiFi();
   void setupServer();
   void StartCaptivePortal();
   void getSSIDs();
   void handleCaptiveMode();
   void handleCaptiveModeToggle();
   void saveConfigFile();
+  void loadWifiCredentials();
   void addWifiCredentials(const String& ssid, const String& password);
   void parseJson(StaticJsonDocument<2048>& json, const String& path);
 

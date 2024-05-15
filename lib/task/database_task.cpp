@@ -37,14 +37,13 @@ void database_task(void *parameter) {
 
     if (captiveMode || !connected) {
       published = false;
-      delay(5000);
+      vTaskDelay(5000 / portTICK_PERIOD_MS);
       continue;
     }
     
     // Time sync and validate connection after captive mode / wifi reconnection / many fails
     if (!prevConnected && connected || prevCaptiveMode && !captiveMode || fails > 4) {
       fails = 0;
-      delay(5000); // give network time to readjust
       
       // Reinitialize InfluxDBClient
       if (client != nullptr) {

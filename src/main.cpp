@@ -18,6 +18,7 @@ double g_pidOutput;
 double g_pidSetPoint;
 int g_segNum;
 bool g_connected;
+bool g_connecting;
 bool g_published;
 bool g_fault;
 
@@ -45,7 +46,8 @@ void setup() {
     delay(200);
   }
 
-  network.initWiFi();
+  // Load WiFi credentials
+  network.loadWifiCredentials();
 
   // Pin modes
   pinMode(heaterPin, OUTPUT);
@@ -72,30 +74,11 @@ void main_task(void* parameter) {
     
     gui_run();
 
-    resetCheck();
   }
 }
 
 //*******************************************************************************************************************************
 
-// Reset button: short press for TFT, 1.5s press for system
-void resetCheck() {
-  if (digitalRead(rstPin) == LOW) {
-    unsigned long resetStart = millis();
-    while (digitalRead(rstPin) == LOW) {   // Wait for the button to be released
-      if (millis() - resetStart > 1500) {  // reset system
-        controller.shutDown();
-        esp_restart();
-      }
-    }
-    unsigned long pressTime = millis() - resetStart;  // Calculate how long the button was pressed
-
-    if (pressTime >= 2000) {  // If pressed for 2 seconds or more, reset the system
-      controller.shutDown();
-      esp_restart();
-    } else if (pressTime >= 50) resetTFT();  // If pressed for 200 ms or more, reset the display
-  }
-}
-
 void loop() {
+  vTaskDelay(10);
 }
