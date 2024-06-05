@@ -37,6 +37,7 @@ void setup() {
   Serial.begin(115200);
   SPI.begin();
 
+  delay(1500);
   gui_start();
 
   // Mount SPIFFS file system

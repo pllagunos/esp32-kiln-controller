@@ -12,9 +12,60 @@ extern Network network;
 
 static const char *TAG = "database_task";
 
-InfluxDBClient* client = nullptr;
+// InfluxDBClient* client = nullptr;
 Point sensor("HORNO ELECTRICO");
 
+InfluxDBClient client(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
+
+void database_task(void* parameter) {
+  bool connected = false;
+  bool prevConnected = false;
+  bool published = false;
+
+  while (1) {
+
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    g_published = published;
+    xSemaphoreGive(mutex);
+
+    bool captiveMode = network.get_captive_mode();
+    // Check WiFi connection
+    prevConnected = connected;
+    connected = network.checkWiFi();
+
+    if (captiveMode || !connected) {
+      published = false;
+      vTaskDelay(5000 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+    if (!prevConnected && connected) {
+      timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
+    }
+
+    if (connected) {
+      sensor.clearFields();
+      
+      // shared variables: segNum, pidInput, pidSetPoint, pidOutput
+      xSemaphoreTake(mutex, portMAX_DELAY);  // Wait for the semaphore to become available
+      sensor.addField("Kiln temperature", g_pidInput);
+      sensor.addField("SetPoint", g_pidSetPoint);
+      sensor.addField("Output", g_pidOutput);
+      sensor.addField("Running", (g_segNum > 0));
+      xSemaphoreGive(mutex);  // Release the semaphore
+
+      // Write data
+      published = (client.writePoint(sensor));
+      if (!published) {
+        Serial.print("InfluxDB write failed: ");
+        Serial.println(client.getLastErrorMessage());
+      }
+
+    }
+  }
+}
+
+/*
 void database_task(void *parameter) {
   bool prevConnected = false;   // Previous WiFi connection status
   bool prevCaptiveMode = false; // Previous captive mode status
@@ -84,3 +135,5 @@ void database_task(void *parameter) {
     
   }
 }
+
+*/

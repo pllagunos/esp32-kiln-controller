@@ -170,7 +170,7 @@ void heat_control::updateSeg() {
       }
     }
   }
-  // If door has just been opened
+  // If door has just been opened (perhaps implement similar method to lastTemp = pidInput;)
   if (!doorClosed && doorClosed_before) {
     lastHoldMins = (millis() - holdStart) / 60000.0;
     // Serial.printf("lastHoldMins saved. last holdMins: %.0f \n", lastHoldMins);
@@ -196,18 +196,7 @@ void heat_control::setupPIDs(int state) {
 
 // SP is set equal to PV, times are adjusted acordingly
 void heat_control::SPequalPV() {
-  Serial.printf("rampStart original = %d ms \n", rampStart);
-  pidSetPoint = pidInput;  // SP = PV
-  Serial.printf("SP = %.2f = pidInput = %.2f \n", pidSetPoint, pidInput);
-  int segTemp = currentProgram.segments[segNum - 1].targetTemperature;
-  int segRamp = currentProgram.segments[segNum - 1].firingRate;
-  double adjRampHours = (segTemp - pidInput) / segRamp;  // "artificial" spanned t
-  rampStart = millis() - (adjRampHours * 3600000.0);    // "artificial" ramp start time
-  Serial.printf("rampStart new = %d ms \n", rampStart);
-
-  double TErampHours = (millis() - rampStart) / 3600000.0;
-  double TEcalcSetPoint = lastTemp + (segRamp * TErampHours);
-  Serial.printf("calculated SP = %.2f \n", TEcalcSetPoint);
+  lastTemp = pidInput;
 }
 
 // *****************************

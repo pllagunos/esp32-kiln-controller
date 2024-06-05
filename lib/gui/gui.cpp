@@ -125,7 +125,6 @@ void gui_idle() {
 
     /* User pressed START */
     if (selectPressed && introSel == 1) {
-      // shift_register.set(gasPin, HIGH);  // allow gas contactor to be manually energized
       if (firingMode == FiringModes::automatic) {
         screen = "confirm"; // go to confirm screen
         confirmSel = 2;     // set selection to OK
@@ -169,9 +168,6 @@ void gui_idle() {
 
     // pressed back
     if (selectPressed && confirmSel == 1) {
-      // shift_register.set(gasPin, LOW); // block gas contactor from being
-      // energized shift_register.set(airPin, HIGH);  // air contactor to be
-      // manually energized
       screen = "intro";
       tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
     }
@@ -179,8 +175,15 @@ void gui_idle() {
     // pressed OK
     if (selectPressed && confirmSel == 2) {
       if (firingMode == FiringModes::automatic && programOK) {
+        // could send "firing" flag as in HMI 
         controller.setMode(firingMode);
-        controller.setSegNum(1);    // firing
+        // Send segment number to start at. Check in which segment PV already is.
+        int segNum;
+        for (segNum = 1; segNum <= currentProgram.segmentQuantity; segNum++) {
+          int target = currentProgram.segments[segNum - 1].targetTemperature;
+          if ((int)controller.getPV() < target) break;
+        }
+        controller.setSegNum(segNum);
         controller.setupPIDs(HIGH); // setup PID algorithm
         controller.setLastTemp();
         controller.setHeatStart(millis());
@@ -622,14 +625,14 @@ void runningScreen() {
       tft.setCursor(0, 120);
       tft.printf("SEGMENT: %i/%i", segNum, currentProgram.segmentQuantity);
       if (isOnHold == 0) {
-        tft.setCursor(160, 150);
+        tft.setCursor(130, 170);
         tft.printf("Ramp to %i%c", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
-        tft.setCursor(160, 170);
+        tft.setCursor(130, 200);
         tft.printf("at %i%c/hr", currentProgram.segments[segNum - 1].firingRate, tempScale);
       } else {
-        tft.setCursor(160, 150);
+        tft.setCursor(130, 170);
         tft.printf("Hold at %i%c \n", currentProgram.segments[segNum - 1].targetTemperature, tempScale);
-        tft.setCursor(160, 170);
+        tft.setCursor(130, 200);
         tft.printf("for %.0f / %i min", holdMins, currentProgram.segments[segNum-1].holdingTime);
       }
     }
@@ -944,16 +947,16 @@ void resetCheck() {
   if (digitalRead(rstPin) == LOW) {
     unsigned long resetStart = millis();
     while (digitalRead(rstPin) == LOW) {   // Wait for the button to be released
-      if (millis() - resetStart > 1500) {  // reset system
+      if (millis() - resetStart > 2000) {  // reset system
         controller.shutDown();
         esp_restart();
       }
     }
     unsigned long pressTime = millis() - resetStart;  // Calculate how long the button was pressed
 
-    if (pressTime >= 2000) {  // If pressed for 2 seconds or more, reset the system
+    if (pressTime >= 1000) {  // If pressed for 1 seconds or more, reset the system
       controller.shutDown();
       esp_restart();
-    } else if (pressTime >= 50) resetTFT();  // If pressed for 200 ms or more, reset the display
+    } else if (pressTime >= 100) resetTFT();  // If pressed for 100 ms or more, reset the display
   }
 }
