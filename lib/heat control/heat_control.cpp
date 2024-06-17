@@ -14,6 +14,7 @@ void heat_control::run() {
     updatePIDs();
     adjustHeat();
     updateSeg();
+    if (SIMULATION) logData(); // will door closing be important in simulation?
   }
   else {
     digitalWrite(relayPin, HIGH); 
@@ -41,7 +42,7 @@ void heat_control::adjustHeat() {
   }
 
   digitalWrite(relayPin, LOW); // enable power
-  if (pidOutput * heatingCycle / 100 >= millis() - heatStart) {
+  if (pidOutput * heatingCycle >= millis() - heatStart) {
     digitalWrite(heaterPin, HIGH);
   } else {
     digitalWrite(heaterPin, LOW);
@@ -62,7 +63,8 @@ void heat_control::shutDown() {
 void heat_control::safetyCheck() {
   if (fault) {
     shutDown();
-    while (fault) {
+    disp_error_msg("Thermocouple Error", "System was shut down", "Press RESET to restart");
+    while (1) { // or while fault?
       if (digitalRead(rstPin) == LOW)
         esp_restart();
     }
@@ -127,7 +129,8 @@ void heat_control::updatePIDs() {
   // Calculate the new setpoint value.  Don't set above / below target temp
   if (isOnHold == false) {
     // Ramp: measure spanned t and calculate the SP with it
-    rampHours = (millis() - rampStart) / 3600000.0;
+    if(SIMULATION) lastRampHours = (millis() - rampStart) * alpha / 3600000.0;
+    else rampHours = (millis() - rampStart) / 3600000.0;
     calcSetPoint = lastTemp + (currentProgram.segments[segNum - 1].firingRate * rampHours);
     // fix SP to target temp in case it's more than target temp
     if (currentProgram.segments[segNum - 1].firingRate >= 0 && calcSetPoint >= currentProgram.segments[segNum - 1].targetTemperature) {
@@ -162,7 +165,8 @@ void heat_control::updateSeg() {
     }
     // Go to the next segment if holding and hold time is completed
     if (isOnHold) {
-      holdMins = (millis() - holdStart) / 60000.0;
+      if (SIMULATION) holdMins = holdMins = (millis() - holdStart) * alpha / 60000.0;
+      else holdMins = (millis() - holdStart) / 60000.0;
       if (holdMins >= currentProgram.segments[segNum-1].holdingTime) {
         segNum += 1;
         isOnHold = false;
@@ -186,15 +190,45 @@ void heat_control::updateSeg() {
 
 //  SETUPPIDS: INITIALIZE THE PID LOOPS
 void heat_control::setupPIDs(int state) {
-  pidCont.SetSampleTime(heatingCycle);  // so that the pid update time is not less than heating cycle
-  pidCont.SetOutputLimits(0, 100);      // from 0%-100%
+  // standard period is equal to heating cycle
+  if (SIMULATION) {
+    int newSampleTime = (heatingCycle/(int)alpha);
+    log_i("sample time for PID = %d \n", newSampleTime);
+    pidCont.SetSampleTime(newSampleTime);
+    pidCont.SetTunings(Kp, Ki*alpha, Kd/alpha);
+  }
+  else pidCont.SetSampleTime(heatingCycle);  
+  
+  pidCont.SetOutputLimits(0, 1);      // from 0%-100%
   pidOutput = 0;                        // output should start at 0% at new firings
   pidSetPoint = 0;                      // same for the setpoint
   if (state == HIGH) pidCont.SetMode(AUTOMATIC);
   if (state == LOW) pidCont.SetMode(MANUAL);
 }
 
-// SP is set equal to PV, times are adjusted acordingly
+// Log data to SPIFFS
+void heat_control::logData() {
+  float elapsed_seconds = (millis()-programStart) * alpha / 1000.0; 
+  int hours = (int) elapsed_seconds / 3600;
+  int mins = ((int) elapsed_seconds % 3600) / 60;
+  int seconds = (int) elapsed_seconds % 60;
+
+  // Open file for appending
+  // File file = SPIFFS.open("/data.csv", FILE_APPEND);
+  // if (!file) {
+  //   Serial.println("Failed to open file for appending");
+  //   return;
+  // }
+  // file.printf("%02d:%02d:%02d,%.2f,%.2f,%.2f,\n", 
+  //   hours, mins, seconds, pidInput, pidOutput, pidSetPoint);
+  // file.close();
+
+  // For plotting on the serial monitor
+  log_i("Time:%02d:%02d:%02d,Temperature:%.2f,Power:%.2f,SetPoint:%.2f",
+    hours, mins, seconds, pidInput, pidOutput, pidSetPoint);
+}
+
+// SP is set equal to PV
 void heat_control::SPequalPV() {
   lastTemp = pidInput;
 }
@@ -221,6 +255,11 @@ void heat_control::setSetPoint(int value) {
 
 void heat_control::setSegNum(int value) {
   segNum = value;
+  // user manually moved to next segment
+  if (segNum > 1 && segNum <= currentProgram.segmentQuantity) {
+    isOnHold = false;
+    rampStart = millis();
+  }
 }
 
 int heat_control::getSegNum() const {

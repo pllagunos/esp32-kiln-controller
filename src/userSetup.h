@@ -3,6 +3,9 @@
 
 #include <Arduino.h>
 
+const bool SIMULATION = false;            // Uses First Order model simulation instead of real input/outputs
+const double alpha = 30;                 // 1s sim = 30s program
+
 // Setup user variables (CHANGE THESE TO MATCH YOUR SETUP)
 const int tempCycle = 500;               // Temperature reading cycle
 const int maxTemp = 1300;                // Maximum temperature (degrees).  If reached, will shut down.

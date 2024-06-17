@@ -45,6 +45,7 @@ namespace{
 void check_faults();
 void setupThermocouple(ADS1220_WE& ads);
 void readTemps(ADS1220_WE& ads);
+void readSimulatedTemp();
 void readCSV(const char* filePath,std::vector<TC_TABLE>& table );  
 float findClosestTemperature(float voltage, const std::vector<TC_TABLE>& table);
 float findClosestVoltage(int temperature, const std::vector<TC_TABLE>& table);
@@ -55,8 +56,16 @@ void sensor_task(void *pvParameter) {
 
   // loop forever
   for (;;) { 
-
-    if (millis() - tempStart >= tempCycle) {
+    
+    static int simTempCycle =  static_cast<int>(ceil(tempCycle / alpha));
+    
+    // Simulate PID input
+    if (SIMULATION && millis() - tempStart >= simTempCycle) {
+      readSimulatedTemp();
+      tempStart = millis();
+    }
+    // or Read Thermocouple
+    else if (millis() - tempStart >= tempCycle) {
       readTemps(ads);
       tempStart = millis();  
     }
@@ -65,45 +74,30 @@ void sensor_task(void *pvParameter) {
 }
 
 void readTemps(ADS1220_WE& ads) {
-  while (1) {
-    check_faults();
 
-    ads.enableTemperatureSensor(true);
-    ambTemp = ads.getTemperature();
-    ads.enableTemperatureSensor(false); 
-    // Serial.printf("\n Cold junction temp: %f degC\n", ambTemp);
+  check_faults();
 
-    V_TC = ads.getVoltage_mV(); // get result in millivolts
-    // Serial.printf("Differential voltage: %f mV\n", V_TC);
-    
-    // Magic algorithm
-    // unsigned long t = micros();
-    V_CJ = findClosestVoltage(ambTemp, table); // find voltage compensation
-    // Serial.printf("finding V_CJ took: %d us\n", micros()-t);
-    // Serial.printf("voltage in cold junction: %f mV\n", V_CJ);
-    float realVoltage = V_TC + V_CJ; // compensate the TC 
-    // Serial.printf("corrected voltage: %f\n", realVoltage);
-    // t = micros();
-    temp = findClosestTemperature(realVoltage, table); // extract temperature from table
-    // Serial.printf("finding temp took: %d us\n", micros()-t);
+  ads.enableTemperatureSensor(true);
+  ambTemp = ads.getTemperature();
+  ads.enableTemperatureSensor(false); 
+  // Serial.printf("\n Cold junction temp: %f degC\n", ambTemp);
 
-    // output
-    // Serial.printf("Thermocouple temperature = %f degC\n", temp);
+  V_TC = ads.getVoltage_mV(); // get result in millivolts
+  // Serial.printf("Differential voltage: %f mV\n", V_TC);
+  
+  // Magic algorithm
+  // unsigned long t = micros();
+  V_CJ = findClosestVoltage(ambTemp, table); // find voltage compensation
+  // Serial.printf("finding V_CJ took: %d us\n", micros()-t);
+  // Serial.printf("voltage in cold junction: %f mV\n", V_CJ);
+  float realVoltage = V_TC + V_CJ; // compensate the TC 
+  // Serial.printf("corrected voltage: %f\n", realVoltage);
+  // t = micros();
+  temp = findClosestTemperature(realVoltage, table); // extract temperature from table
+  // Serial.printf("finding temp took: %d us\n", micros()-t);
 
-    // if there's an error
-    if (isnan(temp) || fault) {
-      disp_error_msg("Thermocouple Error", "System was shut down", "Press RESET to restart");
-
-      if (digitalRead(rstPin) == LOW) {
-        esp_restart();
-      }
-
-      delay(1000);
-    } 
-    else {
-      break;  // Exit loop if temperature read successfully
-    }
-  }
+  // output
+  // Serial.printf("Thermocouple temperature = %f degC\n", temp);
 
   // filter nonsense
   if (temp < 5000 && temp > 0) {
@@ -118,6 +112,44 @@ void readTemps(ADS1220_WE& ads) {
     g_pidInput = temp;
     xSemaphoreGive(mutex);  // Release the semaphore
   }
+}
+
+void readSimulatedTemp() {  
+  // tau * dy/dt = -[y(t)-T_0] + Km * u(t) 
+  static double tau = 1200.0;  // time constant (63% of gain will be reached in tau) [seconds]
+  static double Km = 1600;     // gain = delta Y / delta U [degC/power]
+  static double T_0 = 30;     // starting temp  
+  
+  static double dt = static_cast<int>(ceil(tempCycle / alpha)) / 1000.0; // sampling period [seconds]
+  static bool firstRead = true;
+
+  /* Use Mutex to save temperature to global variable */
+  xSemaphoreTake(mutex, portMAX_DELAY);  //Take semaphore
+  double pidOutput = g_pidOutput;
+  xSemaphoreGive(mutex);  // Release the semaphore
+
+  if(firstRead) {
+    temp = T_0;
+    firstRead = false;
+  }
+
+  // Current derivative based on current input and output
+  double dydt1 = (Km * pidOutput - (temp-T_0)) / (tau/alpha);
+  // Predict the output at the next time step using the initial derivative
+  double y_pred = temp + dydt1 * dt;
+  // Derivative based on the predicted output
+  double dydt2 = (Km * pidOutput - (y_pred-T_0)) / (tau/alpha);
+  // Correcting the prediction using the average of the initial and predicted derivatives
+  temp += 0.5 * (dydt1 + dydt2) * dt;
+
+  // if (abs(temp - 80) < 1.0) {
+  //   temp = 250;
+  // }
+
+  /* Use Mutex to get pidOutput */
+  xSemaphoreTake(mutex, portMAX_DELAY);  //Take semaphore
+  g_pidInput = temp;
+  xSemaphoreGive(mutex);  // Release the semaphore
 }
 
 void check_faults() {
@@ -157,8 +189,10 @@ void readCSV(const char* filePath, std::vector<TC_TABLE>&TABLE ) {
   
   fs::File file = SPIFFS.open(filePath, "r");
 
-  if (!file) {
+  while (!file) {
     disp_error_msg("TC Error", "Can't setup file system.", "Make sure files are uploaded.");
+    if (digitalRead(rstPin) == LOW) esp_restart();
+    delay(200);
   }
 
   // Read and process each line of the file

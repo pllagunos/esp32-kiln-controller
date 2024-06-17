@@ -946,17 +946,17 @@ void openProgram() {
 void resetCheck() {
   if (digitalRead(rstPin) == LOW) {
     unsigned long resetStart = millis();
-    while (digitalRead(rstPin) == LOW) {   // Wait for the button to be released
-      if (millis() - resetStart > 2000) {  // reset system
-        controller.shutDown();
-        esp_restart();
-      }
-    }
-    unsigned long pressTime = millis() - resetStart;  // Calculate how long the button was pressed
-
-    if (pressTime >= 1000) {  // If pressed for 1 seconds or more, reset the system
+    while (digitalRead(rstPin) == LOW && millis() - resetStart <= 2000);
+    
+    unsigned long pressTime = millis() - resetStart;
+    
+    // If pressed for 1 second or more, reset the system
+    if (pressTime >= 1000) { 
       controller.shutDown();
+      tft.fillScreen(TFT_BLACK);
       esp_restart();
-    } else if (pressTime >= 100) resetTFT();  // If pressed for 100 ms or more, reset the display
+    }
+    // If pressed for 100 ms or more, reset the display
+    else if (pressTime >= 100) resetTFT();  
   }
 }

@@ -19,7 +19,6 @@ public:
   void shutDown();
   void setupPIDs(int state);
   void SPequalPV();
-  void safetyCheck();
 
   void setSegNum(int value);
   int getSegNum() const;
@@ -36,10 +35,12 @@ public:
   double getHoldMins() const;
 
 private:
+  void safetyCheck();
   void adjustHeat();
   void checkDoor();
   void updatePIDs();
   void updateSeg();
+  void logData();
 
   FiringModes firingMode;
   unsigned long heatStart;
