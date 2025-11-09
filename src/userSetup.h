@@ -2,8 +2,9 @@
 #define USERSETUP_H
 
 #include <Arduino.h>
+#include "secrets.h"                     // Contains influxdb tokens, see secrets.h.template
 
-const bool SIMULATION = false;            // Uses First Order model simulation instead of real input/outputs
+const bool SIMULATION = false;           // Uses First Order model simulation instead of real input/outputs
 const double alpha = 30;                 // 1s sim = 30s program
 
 // Setup user variables (CHANGE THESE TO MATCH YOUR SETUP)
@@ -36,16 +37,5 @@ const int thermocoupleDRDY = 13;    // Pin # connected to DRDY interrupt of ther
 #define bar_color 0x53D2  // Color for top bar
 #define tftwidth 320      // pixel width
 #define tftheight 240     // pixel height
-
-// InfluxDB v2 server url, e.g. https://eu-central-1-1.aws.cloud2.influxdata.com (Use: InfluxDB UI -> Load Data -> Client Libraries)
-#define INFLUXDB_URL "INFLUX-URL"
-// InfluxDB v2 server or cloud API token (Use: InfluxDB UI -> Data -> API Tokens -> <select token>)
-#define INFLUXDB_TOKEN "REDACTED_TOKEN"
-// InfluxDB v2 organization id (Use: InfluxDB UI -> User -> About -> Common Ids )
-#define INFLUXDB_ORG "INFLUX_ORG"
-// InfluxDB v2 bucket name (Use: InfluxDB UI ->  Data -> Buckets)
-#define INFLUXDB_BUCKET "INFLUX_BUCKET"
-// Set timezone string according to https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
-#define TZ_INFO "CST+6CDT,M4.1.0/2,M10.5.0/2" //"CET-1CEST,M3.5.0,M10.5.0/3"
 
 #endif

@@ -120,7 +120,7 @@ void readSimulatedTemp() {
   static double Km = 1600;     // gain = delta Y / delta U [degC/power]
   static double T_0 = 30;     // starting temp  
   
-  static double dt = static_cast<int>(ceil(tempCycle / alpha)) / 1000.0; // sampling period [seconds]
+  static double dt = tempCycle / 1000.0; // sampling period [seconds]
   static bool firstRead = true;
 
   /* Use Mutex to save temperature to global variable */
@@ -134,11 +134,11 @@ void readSimulatedTemp() {
   }
 
   // Current derivative based on current input and output
-  double dydt1 = (Km * pidOutput - (temp-T_0)) / (tau/alpha);
+  double dydt1 = (Km * pidOutput - (temp-T_0)) / (tau);
   // Predict the output at the next time step using the initial derivative
   double y_pred = temp + dydt1 * dt;
   // Derivative based on the predicted output
-  double dydt2 = (Km * pidOutput - (y_pred-T_0)) / (tau/alpha);
+  double dydt2 = (Km * pidOutput - (y_pred-T_0)) / (tau);
   // Correcting the prediction using the average of the initial and predicted derivatives
   temp += 0.5 * (dydt1 + dydt2) * dt;
 

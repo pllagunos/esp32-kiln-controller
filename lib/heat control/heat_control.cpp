@@ -129,7 +129,7 @@ void heat_control::updatePIDs() {
   // Calculate the new setpoint value.  Don't set above / below target temp
   if (isOnHold == false) {
     // Ramp: measure spanned t and calculate the SP with it
-    if(SIMULATION) lastRampHours = (millis() - rampStart) * alpha / 3600000.0;
+    if(SIMULATION) rampHours = (millis() - rampStart) * alpha / 3600000.0;
     else rampHours = (millis() - rampStart) / 3600000.0;
     calcSetPoint = lastTemp + (currentProgram.segments[segNum - 1].firingRate * rampHours);
     // fix SP to target temp in case it's more than target temp
@@ -165,7 +165,7 @@ void heat_control::updateSeg() {
     }
     // Go to the next segment if holding and hold time is completed
     if (isOnHold) {
-      if (SIMULATION) holdMins = holdMins = (millis() - holdStart) * alpha / 60000.0;
+      if (SIMULATION) holdMins = (millis() - holdStart) * alpha / 60000.0;
       else holdMins = (millis() - holdStart) / 60000.0;
       if (holdMins >= currentProgram.segments[segNum-1].holdingTime) {
         segNum += 1;
@@ -195,6 +195,9 @@ void heat_control::setupPIDs(int state) {
     int newSampleTime = (heatingCycle/(int)alpha);
     log_i("sample time for PID = %d \n", newSampleTime);
     pidCont.SetSampleTime(newSampleTime);
+    // each PID cycle still uses delta{t} = pidCycle
+		// SetSampleTime changes delta{t}, revert it using artificial tunnings
+		// alpha = pidCycle / newSampleTime 
     pidCont.SetTunings(Kp, Ki*alpha, Kd/alpha);
   }
   else pidCont.SetSampleTime(heatingCycle);  
