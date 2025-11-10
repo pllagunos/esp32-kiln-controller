@@ -52,7 +52,7 @@ float findClosestVoltage(int temperature, const std::vector<TC_TABLE>& table);
 
 void sensor_task(void *pvParameter) {
   ADS1220_WE ads = ADS1220_WE(thermocoupleCS, thermocoupleDRDY);
-  setupThermocouple(ads);
+  if (!SIMULATION) setupThermocouple(ads);
 
   // loop forever
   for (;;) { 
