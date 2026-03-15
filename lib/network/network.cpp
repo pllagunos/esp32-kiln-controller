@@ -42,6 +42,13 @@ bool Network::checkWiFi() {
         if (firstConnection) {
           firstConnection = false;
           Serial.printf("Connected to: %s\nIP address: %s\n", WiFi.SSID(), WiFi.localIP().toString().c_str());
+          if (!server_started) {
+            setupServer();
+            server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
+            server.begin();
+            server_started = true;
+            Serial.println("Web server started at http://" + WiFi.localIP().toString());
+          }
         }
         break;
       }
@@ -149,7 +156,7 @@ void Network::setupServer() {
 
   // Triggers a firmware update check (OTA task polls g_ota_status)
   server.on("/checkFirmwareUpdate", HTTP_POST, [this](AsyncWebServerRequest* request) {
-    if (!g_connected || captive_mode) {
+    if (!g_connected) {
       request->send(400, "application/json", "{\"error\":\"Not connected to internet\"}");
       return;
     }
@@ -307,14 +314,16 @@ void Network::StartCaptivePortal() {
   Serial.print("AP IP address: ");
   Serial.println(WiFi.softAPIP());
 
-  Serial.println("Setting up Async WebServer");
-  setupServer();
-
   Serial.println("Starting DNS Server");
   dnsServer.start(53, "*", WiFi.softAPIP());
 
-  server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
-  server.begin();
+  if (!server_started) {
+    Serial.println("Setting up Async WebServer");
+    setupServer();
+    server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
+    server.begin();
+    server_started = true;
+  }
 
   Serial.println("Done!");
 }
@@ -525,8 +534,8 @@ void Network::handleCaptiveModeToggle() {
     lastSSIDUpdate = millis() - 15000;
   } 
   else {
-    server.end();
     captive_mode = false;
+    // Server continues running; accessible on STA IP once WiFi reconnects
   }
 }
 

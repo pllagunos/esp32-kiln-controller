@@ -69,6 +69,7 @@ private:
   String ssid;
   String password;
   bool captive_mode = false;
+  bool server_started = false;
   bool receivedCredentials = false;
   bool receivedInfluxCredentials = false;
   unsigned long lastSSIDUpdate;

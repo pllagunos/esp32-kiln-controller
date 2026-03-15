@@ -113,8 +113,15 @@ jjxDah2nGN59PRbxYvnKkKj9
 static String s_latest_version;
 static String s_latest_tag;
 static String s_firmware_url;
+static String s_firmware_md5;
 
 static bool checkForUpdate() {
+  // Clear stale state so any failure leaves them empty (prevents masking errors as UP_TO_DATE)
+  s_latest_version = "";
+  s_latest_tag     = "";
+  s_firmware_url   = "";
+  s_firmware_md5   = "";
+
   WiFiClientSecure secure;
   secure.setCACert(GITHUB_CA);
 
@@ -132,7 +139,7 @@ static bool checkForUpdate() {
     return false;
   }
 
-  DynamicJsonDocument doc(8192);
+  StaticJsonDocument<8192> doc;
   DeserializationError err = deserializeJson(doc, http.getStream());
   http.end();
 
@@ -143,7 +150,16 @@ static bool checkForUpdate() {
 
   s_latest_version = doc["name"].as<String>();
   s_latest_tag     = doc["tag_name"].as<String>();
-  s_firmware_url   = "";
+
+  // Parse MD5 from release body — CI embeds "Firmware MD5: <hash>" so it is fetched
+  // over the already-verified api.github.com connection rather than the insecure CDN.
+  String body = doc["body"].as<String>();
+  int mdxIdx = body.indexOf("Firmware MD5: ");
+  if (mdxIdx >= 0) {
+    s_firmware_md5 = body.substring(mdxIdx + 14, mdxIdx + 46);
+    s_firmware_md5.trim();
+    s_firmware_md5.toLowerCase();
+  }
 
   JsonArray assets = doc["assets"];
   for (JsonObject asset : assets) {
@@ -153,14 +169,16 @@ static bool checkForUpdate() {
     }
   }
 
-  bool different = (s_latest_version != String(OTA_VERSION));
+  // Compare tag (e.g. "v1.0.1") not the free-form release title
+  bool different = (s_latest_tag != String(OTA_VERSION));
   bool hasAsset  = !s_firmware_url.isEmpty();
   return different && hasAsset;
 }
 
 static bool performUpdate() {
   // GitHub release assets redirect to objects.githubusercontent.com (different CA chain).
-  // Use setInsecure() for the binary download; integrity is verified by Update's MD5 check.
+  // The firmware MD5 was fetched from the trusted api.github.com response; calling
+  // Update.setMD5() here ensures a tampered or corrupted binary is rejected.
   WiFiClientSecure secure;
   secure.setInsecure();
 
@@ -186,6 +204,13 @@ static bool performUpdate() {
     log_e("Not enough space for OTA, error: %d", Update.getError());
     http.end();
     return false;
+  }
+
+  if (!s_firmware_md5.isEmpty()) {
+    Update.setMD5(s_firmware_md5.c_str());
+    log_i("MD5 verification enabled: %s", s_firmware_md5.c_str());
+  } else {
+    log_w("No MD5 in release notes — skipping integrity check");
   }
 
   Update.onProgress([](size_t written, size_t total) {

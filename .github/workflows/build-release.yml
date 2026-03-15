@@ -37,3 +37,18 @@ jobs:
           asset_path: .pio/build/esp32doit-devkit-v1/firmware.bin
           asset_name: esp32doit-devkit-v1_firmware.bin
           asset_content_type: application/octet-stream
+
+      - name: Append firmware MD5 to release notes
+        run: |
+          MD5=$(md5sum .pio/build/esp32doit-devkit-v1/firmware.bin | awk '{print $1}')
+          RELEASE_ID="${{ github.event.release.id }}"
+          EXISTING_BODY=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}" \
+            | jq -r .body)
+          NEW_BODY=$(printf '%s\n\nFirmware MD5: %s' "$EXISTING_BODY" "$MD5")
+          curl -s -X PATCH \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg body "$NEW_BODY" '{body: $body}')" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}"
