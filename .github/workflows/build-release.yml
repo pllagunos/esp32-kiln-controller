@@ -20,16 +20,6 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
-      - name: Create dummy secrets.h
-        run: |
-          cat > src/secrets.h << 'EOF'
-          #ifndef SECRETS_H
-          #define SECRETS_H
-          // Credentials are configured at runtime via the captive portal web UI.
-          // This file exists only to satisfy the #include in userSetup.h.
-          #endif // SECRETS_H
-          EOF
-
       - name: Set OTA version from release tag
         run: |
           RELEASE_TAG="${{ github.event.release.tag_name }}"

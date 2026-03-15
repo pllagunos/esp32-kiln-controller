@@ -2,7 +2,6 @@
 #define USERSETUP_H
 
 #include <Arduino.h>
-#include "secrets.h"                     // Contains influxdb tokens, see secrets.h.template
 
 const bool SIMULATION = false;           // Uses First Order model simulation instead of real input/outputs
 const double alpha = 30;                 // 1s sim = 30s program
