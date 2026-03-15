@@ -24,6 +24,7 @@ bool g_fault;
 
 // External objects initialization
 FiringProgram currentProgram;
+InfluxDbConfig g_influxConfig;
 SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
 SemaphoreHandle_t disp_mutex = xSemaphoreCreateMutex();
 heat_control controller(mutex);
@@ -49,6 +50,8 @@ void setup() {
 
   // Load WiFi credentials
   network.loadWifiCredentials();
+  // Load InfluxDB credentials
+  network.loadInfluxDbCredentials();
 
   // Pin modes
   pinMode(heaterPin, OUTPUT);

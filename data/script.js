@@ -14,6 +14,15 @@ function loadProgramEditor() {
     .then(html => document.body.innerHTML = html);
 }
 
+function loadInfluxDbManager() {
+  fetch('/influxdb-manager')
+    .then(response => response.text())
+    .then(html => {
+      document.body.innerHTML = html;
+      prefillInfluxDbForm();
+    });
+}
+
 // Exit function
 function exit() {
   fetch('/exit')
@@ -58,6 +67,36 @@ function sendWifiManagerForm() {
     .then(result => {
       console.log(result);
       // Redirect to the home page (index.html)
+      window.location.href = '/index.html';
+    })
+}
+
+// Pre-fill InfluxDB form with current saved credentials
+function prefillInfluxDbForm() {
+  fetch('/getInfluxCredentials')
+    .then(response => response.json())
+    .then(data => {
+      if (data.url)    document.getElementById('influxUrl').value    = data.url;
+      if (data.token)  document.getElementById('influxToken').value  = data.token;
+      if (data.org)    document.getElementById('influxOrg').value    = data.org;
+      if (data.bucket) document.getElementById('influxBucket').value = data.bucket;
+      if (data.tzInfo) document.getElementById('influxTzInfo').value = data.tzInfo;
+    })
+    .catch(() => {}); // no credentials saved yet — leave fields empty
+}
+
+// Send InfluxDB manager form
+function sendInfluxDbForm() {
+  const form = document.getElementById('influxDbForm');
+  const formData = new FormData(form);
+
+  fetch('/influxdb-manager', {
+    method: 'POST',
+    body: formData
+  })
+    .then(response => response.text())
+    .then(result => {
+      console.log(result);
       window.location.href = '/index.html';
     })
 }

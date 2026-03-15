@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>InfluxDB Manager</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+
+<body>
+  <div class="topnav">
+    <h1>InfluxDB Manager</h1>
+  </div>
+  <div class="content">
+    <div class="card-grid">
+      <div class="card">
+        <form id="influxDbForm" onsubmit="sendInfluxDbForm(); return false;">
+          <br>
+          URL: <input type="text" name="url" id="influxUrl" placeholder="https://...influxdata.com">
+          <br>
+          Token: <input type="text" name="token" id="influxToken" placeholder="Re-enter API token (required)">
+          <br>
+          Org: <input type="text" name="org" id="influxOrg" placeholder="org name or email">
+          <br>
+          Bucket: <input type="text" name="bucket" id="influxBucket" placeholder="bucket name">
+          <br>
+          Timezone: <input type="text" name="tzInfo" id="influxTzInfo" placeholder="e.g. CST+6CDT,M4.1.0/2,M10.5.0/2">
+          <br>
+          <input type="submit" value="Save">
+        </form>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+
+</html>

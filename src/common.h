@@ -24,7 +24,17 @@ enum class FiringModes {
   manual
 };
 
+struct InfluxDbConfig {
+  String url;
+  String token;
+  String org;
+  String bucket;
+  String tzInfo;
+  bool configured = false;
+};
+
 extern FiringProgram currentProgram; // Current firing program loaded into memory
+extern InfluxDbConfig g_influxConfig; // InfluxDB connection settings loaded from SPIFFS
 extern SemaphoreHandle_t mutex;      // For thread safety
 extern SemaphoreHandle_t disp_mutex; // For display calls
 

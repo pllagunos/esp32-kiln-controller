@@ -41,6 +41,8 @@ public:
   void saveConfigFile();
   void loadWifiCredentials();
   void addWifiCredentials(const String& ssid, const String& password);
+  void loadInfluxDbCredentials();
+  void saveInfluxDbCredentials(const String& url, const String& token, const String& org, const String& bucket, const String& tzInfo);
   void parseJson(StaticJsonDocument<2048>& json, const String& path);
 
   int extractSegmentNumber(const String& paramName);
@@ -48,6 +50,8 @@ public:
 
   bool checkWiFi();
   bool get_captive_mode() const;
+  bool hasNewInfluxCredentials() const;
+  void clearInfluxCredentialsFlag();
 
 private:
   SemaphoreHandle_t& sharedMutex;
@@ -66,6 +70,7 @@ private:
   String password;
   bool captive_mode = false;
   bool receivedCredentials = false;
+  bool receivedInfluxCredentials = false;
   unsigned long lastSSIDUpdate;
 };
 

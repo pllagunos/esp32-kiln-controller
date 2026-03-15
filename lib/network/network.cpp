@@ -99,6 +99,22 @@ void Network::setupServer() {
     request->send(fileSystem, "/wifimanager.html", "text/html");
   });
 
+  // Route for the InfluxDB manager config page
+  server.on("/influxdb-manager", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    request->send(fileSystem, "/influxdb-manager.html", "text/html");
+  });
+
+  // Returns current InfluxDB credentials as JSON for form pre-fill.
+  // Token is intentionally omitted to avoid exposing it over the open AP.
+  server.on("/getInfluxCredentials", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    StaticJsonDocument<2048> json;
+    parseJson(json, "/influxdb_credentials.json");
+    json.remove("token"); // never send the token back to the browser
+    String output;
+    serializeJson(json, output);
+    request->send(200, "application/json", output);
+  });
+
   // Route for the program editor page
   server.on("/program-editor", HTTP_GET, [this](AsyncWebServerRequest* request) {
     request->send(fileSystem, "/firingProgram.html", "text/html");
@@ -143,6 +159,26 @@ void Network::setupServer() {
     receivedCredentials = true;
 
     // Go back to the main page
+    request->send(fileSystem, "/index.html", "text/html");
+  });
+
+  // Saving InfluxDB credentials
+  server.on("/influxdb-manager", HTTP_POST, [this](AsyncWebServerRequest* request) {
+    String url, token, org, bucket, tzInfo;
+    int params = request->params();
+    for (int i = 0; i < params; i++) {
+      AsyncWebParameter* p = request->getParam(i);
+      if (p->isPost()) {
+        if (p->name() == "url")    url    = p->value();
+        if (p->name() == "token")  token  = p->value();
+        if (p->name() == "org")    org    = p->value();
+        if (p->name() == "bucket") bucket = p->value();
+        if (p->name() == "tzInfo") tzInfo = p->value();
+      }
+    }
+    if (!url.isEmpty() && !token.isEmpty()) {
+      saveInfluxDbCredentials(url, token, org, bucket, tzInfo);
+    }
     request->send(fileSystem, "/index.html", "text/html");
   });
 
@@ -361,6 +397,67 @@ void Network::parseJson(StaticJsonDocument<2048>& json, const String& path) {
   serializeJsonPretty(json, Serial);
   Serial.println();
   file.close();
+}
+
+// loadInfluxDbCredentials() - loads InfluxDB credentials from JSON file into g_influxConfig
+void Network::loadInfluxDbCredentials() {
+  StaticJsonDocument<2048> json;
+  parseJson(json, "/influxdb_credentials.json");
+
+  if (json.isNull() || !json.containsKey("url")) {
+    Serial.println("No InfluxDB credentials found. Publishing disabled until configured.");
+    g_influxConfig.configured = false;
+    return;
+  }
+
+  g_influxConfig.url      = json["url"]    | "";
+  g_influxConfig.token    = json["token"]  | "";
+  g_influxConfig.org      = json["org"]    | "";
+  g_influxConfig.bucket   = json["bucket"] | "";
+  g_influxConfig.tzInfo   = json["tzInfo"] | "UTC0";
+  g_influxConfig.configured = !g_influxConfig.url.isEmpty() && !g_influxConfig.token.isEmpty();
+  Serial.printf("InfluxDB credentials loaded. URL: %s\n", g_influxConfig.url.c_str());
+}
+
+// saveInfluxDbCredentials() - saves InfluxDB credentials as JSON to SPIFFS
+void Network::saveInfluxDbCredentials(const String& url, const String& token, const String& org, const String& bucket, const String& tzInfo) {
+  StaticJsonDocument<1024> json;
+  json["url"]    = url;
+  json["token"]  = token;
+  json["org"]    = org;
+  json["bucket"] = bucket;
+  json["tzInfo"] = tzInfo;
+
+  fs::File file = fileSystem.open("/influxdb_credentials.json", FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open influxdb_credentials.json for writing");
+    return;
+  }
+  if (!serializeJson(json, file)) {
+    Serial.println(F("Failed to write InfluxDB credentials"));
+  }
+  serializeJsonPretty(json, Serial);
+  Serial.println();
+  file.close();
+
+  // Update live config and signal the database task — guarded to prevent cross-core data race
+  xSemaphoreTake(sharedMutex, portMAX_DELAY);
+  g_influxConfig.url      = url;
+  g_influxConfig.token    = token;
+  g_influxConfig.org      = org;
+  g_influxConfig.bucket   = bucket;
+  g_influxConfig.tzInfo   = tzInfo;
+  g_influxConfig.configured = true;
+  receivedInfluxCredentials = true;
+  xSemaphoreGive(sharedMutex);
+}
+
+bool Network::hasNewInfluxCredentials() const {
+  return receivedInfluxCredentials;
+}
+
+void Network::clearInfluxCredentialsFlag() {
+  receivedInfluxCredentials = false;
 }
 
 // Changes the captive mode, called from GUI
