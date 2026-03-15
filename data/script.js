@@ -23,6 +23,91 @@ function loadInfluxDbManager() {
     });
 }
 
+var _otaPollInterval = null;
+
+function loadFirmwareUpdate() {
+  fetch('/getFirmwareStatus')
+    .then(r => r.json())
+    .then(data => {
+      var cv = document.getElementById('currentVersion');
+      if (cv) cv.textContent = data.currentVersion || '?';
+      _applyFirmwareStatus(data);
+    })
+    .catch(() => {});
+}
+
+function checkForUpdate() {
+  document.getElementById('statusMsg').textContent = 'Checking…';
+  document.getElementById('checkBtn').disabled = true;
+  document.getElementById('updateBtn').style.display = 'none';
+  fetch('/checkFirmwareUpdate', { method: 'POST' })
+    .then(r => r.json())
+    .then(() => { _startOtaPoll(); })
+    .catch(e => {
+      document.getElementById('statusMsg').textContent = 'Error: ' + e;
+      document.getElementById('checkBtn').disabled = false;
+    });
+}
+
+function performOtaUpdate() {
+  document.getElementById('statusMsg').textContent = 'Installing update… device will restart.';
+  document.getElementById('updateBtn').disabled = true;
+  fetch('/performOTA', { method: 'POST' })
+    .then(r => r.json())
+    .then(() => { _startOtaPoll(); })
+    .catch(e => {
+      document.getElementById('statusMsg').textContent = 'Error: ' + e;
+    });
+}
+
+function _startOtaPoll() {
+  if (_otaPollInterval) clearInterval(_otaPollInterval);
+  _otaPollInterval = setInterval(function () {
+    fetch('/getFirmwareStatus')
+      .then(r => r.json())
+      .then(data => { _applyFirmwareStatus(data); })
+      .catch(() => {});
+  }, 2000);
+}
+
+function _applyFirmwareStatus(data) {
+  var statusEl = document.getElementById('statusMsg');
+  var latestEl = document.getElementById('latestVersion');
+  var checkBtn = document.getElementById('checkBtn');
+  var updateBtn = document.getElementById('updateBtn');
+  if (!statusEl) return;
+
+  if (latestEl && data.latestVersion) latestEl.textContent = data.latestVersion;
+
+  switch (data.status) {
+    case 'checking':
+      statusEl.textContent = 'Checking for updates…';
+      break;
+    case 'up_to_date':
+      statusEl.textContent = '✓ Firmware is up to date.';
+      if (checkBtn) checkBtn.disabled = false;
+      if (updateBtn) updateBtn.style.display = 'none';
+      if (_otaPollInterval) { clearInterval(_otaPollInterval); _otaPollInterval = null; }
+      break;
+    case 'update_available':
+      statusEl.textContent = 'Update available: ' + (data.latestVersion || data.latestTag);
+      if (checkBtn) checkBtn.disabled = false;
+      if (updateBtn) { updateBtn.style.display = ''; updateBtn.disabled = false; }
+      if (_otaPollInterval) { clearInterval(_otaPollInterval); _otaPollInterval = null; }
+      break;
+    case 'updating':
+      statusEl.textContent = 'Installing… do not power off.';
+      break;
+    case 'error':
+      statusEl.textContent = '✗ Error. Check that the device is connected to the internet.';
+      if (checkBtn) checkBtn.disabled = false;
+      if (_otaPollInterval) { clearInterval(_otaPollInterval); _otaPollInterval = null; }
+      break;
+    default:
+      break;
+  }
+}
+
 // Exit function
 function exit() {
   fetch('/exit')

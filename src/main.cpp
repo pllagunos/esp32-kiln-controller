@@ -9,6 +9,7 @@
 #include "gui.h"            // Graphical user interface source file
 #include "heat_control.h"   // PID and heating control code
 #include "network.h"        // WiFi and Server related code
+#include "ota_task.h"       // OTA firmware update task
 #include "database_task.h"  // Influx DB publishing task
 #include "sensor_task.h"    // Thermocouple reading task
 
@@ -25,6 +26,9 @@ bool g_fault;
 // External objects initialization
 FiringProgram currentProgram;
 InfluxDbConfig g_influxConfig;
+OtaStatus g_ota_status = OtaStatus::IDLE;
+String g_ota_latest_version;
+String g_ota_latest_tag;
 SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
 SemaphoreHandle_t disp_mutex = xSemaphoreCreateMutex();
 heat_control controller(mutex);
@@ -64,6 +68,8 @@ void setup() {
   xTaskCreatePinnedToCore(sensor_task, "Sensor", 8192, NULL, 1, NULL, 1); 
   // Create the publishing task and set its affinity to core 0
   xTaskCreatePinnedToCore(database_task, "Database", 32768, NULL, 1, NULL, 0);
+  // Create the OTA task and set its affinity to core 0
+  xTaskCreatePinnedToCore(ota_task, "OTA", 32768, NULL, 1, NULL, 0);
 
   log_i("Total heap: %d", ESP.getHeapSize());
   log_i("Free heap: %d", ESP.getFreeHeap());

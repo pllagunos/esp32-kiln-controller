@@ -33,8 +33,20 @@ struct InfluxDbConfig {
   bool configured = false;
 };
 
+enum class OtaStatus {
+  IDLE,
+  CHECKING,
+  UPDATE_AVAILABLE,
+  UP_TO_DATE,
+  UPDATING,
+  ERROR
+};
+
 extern FiringProgram currentProgram; // Current firing program loaded into memory
 extern InfluxDbConfig g_influxConfig; // InfluxDB connection settings loaded from SPIFFS
+extern OtaStatus g_ota_status;        // OTA state machine status
+extern String g_ota_latest_version;   // Latest release name from GitHub
+extern String g_ota_latest_tag;       // Latest release tag from GitHub
 extern SemaphoreHandle_t mutex;      // For thread safety
 extern SemaphoreHandle_t disp_mutex; // For display calls
 

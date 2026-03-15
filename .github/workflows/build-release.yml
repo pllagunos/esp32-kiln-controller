@@ -1,0 +1,49 @@
+name: Build and Release Firmware
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Create dummy secrets.h
+        run: |
+          cat > src/secrets.h << 'EOF'
+          #ifndef SECRETS_H
+          #define SECRETS_H
+          // Credentials are configured at runtime via the captive portal web UI.
+          // This file exists only to satisfy the #include in userSetup.h.
+          #endif // SECRETS_H
+          EOF
+
+      - name: Set OTA version from release tag
+        run: |
+          RELEASE_TAG="${{ github.event.release.tag_name }}"
+          sed -i "s|'-DOTA_VERSION=\"local_development\"'|'-DOTA_VERSION=\"${RELEASE_TAG}\"'|" platformio.ini
+
+      - name: Build firmware
+        run: platformio run --environment esp32doit-devkit-v1
+
+      - name: Upload firmware to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: .pio/build/esp32doit-devkit-v1/firmware.bin
+          asset_name: esp32doit-devkit-v1_firmware.bin
+          asset_content_type: application/octet-stream

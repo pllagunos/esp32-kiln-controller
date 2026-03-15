@@ -141,7 +141,8 @@ This project can send data to InfluxDB for real-time monitoring. Here's how to s
 Contributions are welcome! If you have any ideas, suggestions, or improvements, please feel free to open an issue or submit a pull request.
 
 ## To Do
-Autotune PID ala https://github.com/hirschmann/pid-autotune/blob/master/autotune.py 
+- Ability to view and edit programs from webserver
+- Autotune PID ala https://github.com/hirschmann/pid-autotune/blob/master/autotune.py 
 
 
 ## License

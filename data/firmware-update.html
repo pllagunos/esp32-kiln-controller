@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Firmware Update</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+
+<body>
+  <div class="topnav">
+    <h1>Firmware Update</h1>
+  </div>
+  <div class="content">
+    <div class="card-grid">
+      <div class="card">
+        <p>Current version: <strong id="currentVersion">loading…</strong></p>
+        <p>Latest version: <strong id="latestVersion">—</strong></p>
+        <p id="statusMsg">&nbsp;</p>
+        <p>
+          <button id="checkBtn" onclick="checkForUpdate()">Check for Update</button>
+          <button id="updateBtn" onclick="performOtaUpdate()" style="display:none">Update Now</button>
+          <button onclick="window.location.href='/'">Go Back</button>
+        </p>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+  <script>loadFirmwareUpdate();</script>
+</body>
+
+</html>

@@ -1,5 +1,9 @@
 #include "network.h"
 
+#ifndef OTA_VERSION
+  #define OTA_VERSION "local_development"
+#endif
+
 Network::Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem)
 : server(80), sharedMutex(mutex), fileSystem(fileSystem) {
 
@@ -113,6 +117,59 @@ void Network::setupServer() {
     String output;
     serializeJson(json, output);
     request->send(200, "application/json", output);
+  });
+
+  // Route for the firmware update page
+  server.on("/firmware-update", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    request->send(fileSystem, "/firmware-update.html", "text/html");
+  });
+
+  // Returns current OTA status as JSON for the firmware update page to poll
+  server.on("/getFirmwareStatus", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    StaticJsonDocument<256> json;
+    json["currentVersion"] = String(OTA_VERSION);
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    json["latestVersion"] = g_ota_latest_version;
+    json["latestTag"]     = g_ota_latest_tag;
+    OtaStatus s = g_ota_status;
+    xSemaphoreGive(sharedMutex);
+
+    const char* statusStr = "idle";
+    if      (s == OtaStatus::CHECKING)          statusStr = "checking";
+    else if (s == OtaStatus::UPDATE_AVAILABLE)  statusStr = "update_available";
+    else if (s == OtaStatus::UP_TO_DATE)        statusStr = "up_to_date";
+    else if (s == OtaStatus::UPDATING)          statusStr = "updating";
+    else if (s == OtaStatus::ERROR)             statusStr = "error";
+    json["status"] = statusStr;
+
+    String output;
+    serializeJson(json, output);
+    request->send(200, "application/json", output);
+  });
+
+  // Triggers a firmware update check (OTA task polls g_ota_status)
+  server.on("/checkFirmwareUpdate", HTTP_POST, [this](AsyncWebServerRequest* request) {
+    if (!g_connected || captive_mode) {
+      request->send(400, "application/json", "{\"error\":\"Not connected to internet\"}");
+      return;
+    }
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    g_ota_status = OtaStatus::CHECKING;
+    xSemaphoreGive(sharedMutex);
+    request->send(200, "application/json", "{\"status\":\"checking\"}");
+  });
+
+  // Triggers OTA installation when an update is available
+  server.on("/performOTA", HTTP_POST, [this](AsyncWebServerRequest* request) {
+    xSemaphoreTake(sharedMutex, portMAX_DELAY);
+    bool ready = (g_ota_status == OtaStatus::UPDATE_AVAILABLE);
+    if (ready) g_ota_status = OtaStatus::UPDATING;
+    xSemaphoreGive(sharedMutex);
+    if (!ready) {
+      request->send(400, "application/json", "{\"error\":\"No update available\"}");
+      return;
+    }
+    request->send(200, "application/json", "{\"status\":\"updating\"}");
   });
 
   // Route for the program editor page
