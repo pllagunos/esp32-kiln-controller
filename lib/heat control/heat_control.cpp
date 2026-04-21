@@ -14,7 +14,7 @@ void heat_control::run() {
     updatePIDs();
     adjustHeat();
     updateSeg();
-    if (SIMULATION) logData(); // will door closing be important in simulation?
+    if (SIMULATION) logData();
   }
   else {
     digitalWrite(relayPin, HIGH); 
