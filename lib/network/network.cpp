@@ -179,10 +179,105 @@ void Network::setupServer() {
     request->send(200, "application/json", "{\"status\":\"updating\"}");
   });
 
+  // Program library page
+  server.on("/programs", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    request->send(fileSystem, "/programs.html", "text/html");
+  });
+
   // Route for the program editor page
   server.on("/program-editor", HTTP_GET, [this](AsyncWebServerRequest* request) {
     request->send(fileSystem, "/firingProgram.html", "text/html");
   });
+
+  // List all saved programs as JSON
+  server.on("/list-programs", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    if (!catalogLoaded_) refreshCatalog();
+    DynamicJsonDocument doc(4096);
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < catalogSize_; i++) {
+      JsonObject entry = arr.createNestedObject();
+      entry["id"]           = catalog_[i].id;
+      entry["name"]         = catalog_[i].name;
+      entry["created_date"] = catalog_[i].createdDate;
+      entry["duration"]     = catalog_[i].duration;
+    }
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+  });
+
+  // Fetch a single program by id as normalized JSON
+  server.on("/get-program", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    if (!request->hasParam("id")) {
+      request->send(400, "application/json", "{\"error\":\"id required\"}");
+      return;
+    }
+    if (!catalogLoaded_) refreshCatalog();
+    String id = request->getParam("id")->value();
+    String filename;
+    for (int i = 0; i < catalogSize_; i++) {
+      if (catalog_[i].id == id) { filename = catalog_[i].filename; break; }
+    }
+    if (filename.isEmpty()) {
+      request->send(404, "application/json", "{\"error\":\"not found\"}");
+      return;
+    }
+    File f = fileSystem.open(filename, FILE_READ);
+    if (!f) {
+      request->send(500, "application/json", "{\"error\":\"file open failed\"}");
+      return;
+    }
+    DynamicJsonDocument in(4096);
+    if (deserializeJson(in, f) != DeserializationError::Ok) {
+      f.close();
+      request->send(500, "application/json", "{\"error\":\"parse failed\"}");
+      return;
+    }
+    f.close();
+
+    DynamicJsonDocument out(4096);
+    out["id"] = id;
+    out["name"] = in["name"] | "";
+    const char* cd = in["created_date"];
+    out["created_date"] = cd ? cd : (in["createdDate"] | "");
+    out["duration"] = in["duration"] | "";
+    JsonArray inSegs = in["segments"].as<JsonArray>();
+    JsonArray outSegs = out.createNestedArray("segments");
+    if (!inSegs.isNull()) {
+      for (JsonObject seg : inSegs) {
+        JsonObject os = outSegs.createNestedObject();
+        int t = seg["target_temperature"] | 0;
+        if (t == 0) t = seg["targetTemperature"] | 0;
+        int r = seg["firing_rate"] | 0;
+        if (r == 0) r = seg["firingRate"] | 0;
+        int h = seg["holding_time"] | 0;
+        if (h == 0) h = seg["holdingTime"] | 0;
+        os["target_temperature"] = t;
+        os["firing_rate"] = r;
+        os["holding_time"] = h;
+      }
+    }
+    String json;
+    serializeJson(out, json);
+    request->send(200, "application/json", json);
+  });
+
+  // Save (create or update) a program — JSON body
+  server.on("/save-program", HTTP_POST,
+    [this](AsyncWebServerRequest* request) {
+      String result = handleSaveProgramBody(pendingBody_);
+      pendingBody_ = "";
+      request->send(200, "application/json", result);
+    },
+    nullptr,
+    [this](AsyncWebServerRequest* /*request*/, uint8_t* data, size_t len, size_t index, size_t total) {
+      if (index == 0) {
+        pendingBody_ = "";
+        pendingBody_.reserve(total);
+      }
+      for (size_t i = 0; i < len; i++) pendingBody_ += (char)data[i];
+    }
+  );
 
   // Route when exit is called
   server.on("/exit", HTTP_GET, [this](AsyncWebServerRequest* request) {
@@ -246,57 +341,6 @@ void Network::setupServer() {
     request->send(fileSystem, "/index.html", "text/html");
   });
 
-  // Retrieving firing schedule files
-  server.on("/program-editor", HTTP_POST, [this](AsyncWebServerRequest* request) {
-    Serial.println("program editor posted");
-    int params = request->params();
-    int maxIndex = 0;
-
-    for (int i = 0; i < params; i++) {
-      AsyncWebParameter* p = request->getParam(i);
-      if (p->isPost()) {
-        // Process program defining parameters
-        if (p->name() == "programNumber") {
-          serverProgram.programNumber = p->value().toInt();
-          Serial.printf("Received Program Number: %d\n", serverProgram.programNumber);
-        }
-        if (p->name() == "createdDate") {
-          serverProgram.createdDate = p->value().c_str();
-          // Serial.printf("Created Date: %s\n", serverProgram.createdDate.c_str());
-        }
-        if (p->name() == "name") {
-          serverProgram.name = p->value().c_str();
-          Serial.printf("Program Name: %s\n", serverProgram.name.c_str());
-        }
-        if (p->name() == "duration") {
-          serverProgram.duration = p->value().c_str();
-          // Serial.printf("Duration: %s\n", serverProgram.duration.c_str());
-        }
-
-        // Now process segment specific parameters
-        if (p->name().startsWith("target") || p->name().startsWith("speed") || p->name().startsWith("hold")) {
-          int segmentIndex = extractSegmentNumber(p->name()) - 1; // Convert to 0-based index
-          maxIndex = max(segmentIndex, maxIndex);
-
-          if (p->name().startsWith("target")) {
-            serverProgram.segments[segmentIndex].targetTemperature = p->value().toInt();
-          } else if (p->name().startsWith("speed")) {
-            serverProgram.segments[segmentIndex].firingRate = p->value().toInt();
-          } else if (p->name().startsWith("hold")) {
-            serverProgram.segments[segmentIndex].holdingTime = p->value().toInt();
-          }
-        }
-      }
-    }
-    serverProgram.segmentQuantity = maxIndex + 1;
-    Serial.printf("Segment quantity: %d\n", serverProgram.segmentQuantity);
-
-    saveConfigFile();
-
-    // Go back to the main page
-    request->send(fileSystem, "/index.html", "text/html");
-  });
-  
   // Redirect any request to the root to the configuration page (catch all route)
   server.onNotFound([this](AsyncWebServerRequest* request) {
     request->send(fileSystem, "/index.html", "text/html");
@@ -552,4 +596,203 @@ void Network::handleCaptiveMode() {
 // Returns captive mode status
 bool Network::get_captive_mode() const {
   return captive_mode;
+}
+
+// makeSlug: converts a program name + date into a filesystem-safe identifier
+String Network::makeSlug(const String& name, const String& date) {
+  String src = name;
+  src.trim();
+  if (!date.isEmpty()) {
+    String d = date;
+    d.replace("/", "-");
+    d.replace(".", "-");
+    src += "-" + d;
+  }
+  src.toLowerCase();
+  String slug = "";
+  bool lastHyphen = false;
+  for (unsigned int i = 0; i < src.length(); i++) {
+    char c = src.charAt(i);
+    if (isAlphaNumeric(c)) {
+      slug += c;
+      lastHyphen = false;
+    } else if (!lastHyphen && slug.length() > 0) {
+      slug += '-';
+      lastHyphen = true;
+    }
+  }
+  while (slug.length() > 0 && slug.charAt(slug.length() - 1) == '-')
+    slug.remove(slug.length() - 1);
+  if (slug.isEmpty()) slug = "program";
+  if (slug.length() > 40) slug = slug.substring(0, 40);
+  return slug;
+}
+
+// uniqueSlug: appends a numeric suffix if the generated filename already exists
+String Network::uniqueSlug(const String& base) {
+  if (!fileSystem.exists("/prog_" + base + ".json")) return base;
+  for (int i = 2; i <= 99; i++) {
+    String candidate = base + "-" + String(i);
+    if (!fileSystem.exists("/prog_" + candidate + ".json")) return candidate;
+  }
+  return base + "-" + String(millis() % 10000);
+}
+
+// refreshCatalog: scans filesystem for program files and rebuilds in-memory catalog
+void Network::refreshCatalog() {
+  catalogSize_ = 0;
+  catalogLoaded_ = true;
+
+  File root = fileSystem.open("/");
+  if (!root || !root.isDirectory()) return;
+
+  // Collect matching filenames first (avoids keeping two file handles open simultaneously)
+  String fnames[PROGRAM_CATALOG_MAX];
+  bool newFmt[PROGRAM_CATALOG_MAX];
+  int fc = 0;
+
+  File f = root.openNextFile();
+  while (f && fc < PROGRAM_CATALOG_MAX) {
+    if (!f.isDirectory()) {
+      String fname = String(f.name()); // SPIFFS returns full path e.g. /prog_foo.json
+      String base = fname.startsWith("/") ? fname.substring(1) : fname;
+      bool legacy = base.startsWith("firingProgram_") && base.endsWith(".json");
+      bool isNew  = base.startsWith("prog_")          && base.endsWith(".json");
+      if (legacy || isNew) {
+        fnames[fc]  = fname.startsWith("/") ? fname : "/" + fname;
+        newFmt[fc]  = isNew;
+        fc++;
+      }
+    }
+    f = root.openNextFile();
+  }
+
+  // Read metadata from each matched file
+  for (int i = 0; i < fc && catalogSize_ < PROGRAM_CATALOG_MAX; i++) {
+    File pf = fileSystem.open(fnames[i], FILE_READ);
+    if (!pf) continue;
+
+    StaticJsonDocument<1024> pdoc;
+    bool ok = (deserializeJson(pdoc, pf) == DeserializationError::Ok);
+    pf.close();
+    if (!ok) continue;
+
+    ProgramCatalogEntry& e = catalog_[catalogSize_];
+    e.filename   = fnames[i];
+    e.name       = pdoc["name"] | "Unnamed";
+    const char* cd = pdoc["created_date"];
+    e.createdDate = cd ? String(cd) : String(pdoc["createdDate"] | "");
+    e.duration   = pdoc["duration"] | String("");
+
+    if (newFmt[i]) {
+      // Strip "prog_" prefix and ".json" suffix to recover slug
+      String base = fnames[i].substring(1); // remove leading /
+      e.id = base.substring(5, base.length() - 5);
+    } else {
+      e.id = makeSlug(e.name, e.createdDate);
+      if (e.id == "program") e.id = "prog-" + String(catalogSize_);
+    }
+
+    catalogSize_++;
+  }
+
+  Serial.printf("Catalog refreshed: %d program(s)\n", catalogSize_);
+}
+
+int Network::getProgramCount() {
+  if (!catalogLoaded_) refreshCatalog();
+  return catalogSize_;
+}
+
+Network::ProgramCatalogEntry Network::getProgramEntry(int oneBasedIndex) {
+  if (!catalogLoaded_) refreshCatalog();
+  if (oneBasedIndex < 1 || oneBasedIndex > catalogSize_) return ProgramCatalogEntry{};
+  return catalog_[oneBasedIndex - 1];
+}
+
+// handleSaveProgramBody: validates and persists a JSON program payload
+String Network::handleSaveProgramBody(const String& body) {
+  if (body.isEmpty()) return "{\"error\":\"Empty body\"}";
+
+  DynamicJsonDocument doc(4096);
+  if (deserializeJson(doc, body) != DeserializationError::Ok)
+    return "{\"error\":\"Invalid JSON\"}";
+
+  const char* name = doc["name"];
+  if (!name || strlen(name) == 0) return "{\"error\":\"name is required\"}";
+
+  const char* createdDate = doc["created_date"] | "";
+
+  JsonArray segs = doc["segments"].as<JsonArray>();
+  if (segs.isNull() || segs.size() == 0)
+    return "{\"error\":\"at least one segment required\"}";
+  if ((int)segs.size() > maxSegments)
+    return "{\"error\":\"too many segments\"}";
+
+  // Compute duration from segments
+  int totalMins = 0, prevTemp = 20;
+  for (JsonObject seg : segs) {
+    int t = seg["target_temperature"] | 0;
+    if (t == 0) t = seg["targetTemperature"] | 0;
+    int r = abs(seg["firing_rate"] | (int)(seg["firingRate"] | 0));
+    int h = seg["holding_time"] | 0;
+    if (h == 0) h = seg["holdingTime"] | 0;
+    if (r > 0) totalMins += abs(t - prevTemp) * 60 / r;
+    totalMins += h;
+    prevTemp = t;
+  }
+
+  // Determine existing file to replace (rename or update in-place)
+  String existingId  = doc["existing_id"] | String("");
+  String existingFile;
+  if (!catalogLoaded_) refreshCatalog();
+  for (int i = 0; i < catalogSize_; i++) {
+    if (catalog_[i].id == existingId) { existingFile = catalog_[i].filename; break; }
+  }
+
+  String baseSlug = makeSlug(String(name), String(createdDate));
+  String finalSlug, finalFilename;
+  if (!existingId.isEmpty() && existingId == baseSlug) {
+    finalSlug     = existingId;
+    finalFilename = "/prog_" + finalSlug + ".json";
+  } else {
+    finalSlug     = uniqueSlug(baseSlug);
+    finalFilename = "/prog_" + finalSlug + ".json";
+    if (!existingFile.isEmpty() && existingFile != finalFilename)
+      fileSystem.remove(existingFile);
+  }
+
+  // Build canonical document
+  DynamicJsonDocument out(4096);
+  out["name"]         = name;
+  out["created_date"] = createdDate;
+  out["duration"]     = String(totalMins) + " min";
+  JsonArray outSegs   = out.createNestedArray("segments");
+  for (JsonObject seg : segs) {
+    JsonObject os   = outSegs.createNestedObject();
+    int t = seg["target_temperature"] | 0;
+    if (t == 0) t = seg["targetTemperature"] | 0;
+    int r = seg["firing_rate"] | 0;
+    if (r == 0) r = seg["firingRate"] | 0;
+    int h = seg["holding_time"] | 0;
+    if (h == 0) h = seg["holdingTime"] | 0;
+    os["target_temperature"] = t;
+    os["firing_rate"]        = abs(r);
+    os["holding_time"]       = h;
+  }
+
+  File wf = fileSystem.open(finalFilename, FILE_WRITE);
+  if (!wf) return "{\"error\":\"Failed to open file for writing\"}";
+  if (serializeJson(out, wf) == 0) {
+    wf.close();
+    return "{\"error\":\"Failed to write JSON\"}";
+  }
+  wf.close();
+
+  // Invalidate catalog so next access rebuilds it
+  catalogLoaded_ = false;
+  refreshCatalog();
+
+  Serial.printf("Saved program '%s' → %s\n", name, finalFilename.c_str());
+  return "{\"id\":\"" + finalSlug + "\"}";
 }

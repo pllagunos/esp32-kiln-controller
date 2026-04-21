@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Firing Programs</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" type="text/css" href="style.css">
+  <style>
+    .programs-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75em;
+      max-width: 700px;
+      width: 100%;
+      margin: 1em auto;
+      padding: 0 1em;
+    }
+    .empty-state {
+      color: #666;
+      font-size: 1.1rem;
+      padding: 2em;
+    }
+  </style>
+</head>
+<body>
+  <div class="topnav">
+    <h1>Firing Programs</h1>
+  </div>
+  <div class="content">
+    <div class="page-nav">
+      <button onclick="window.location.href='/'" class="button-on">Home</button>
+      <button onclick="window.location.href='/program-editor'" class="button-segment">+ New Program</button>
+    </div>
+    <div id="programs-list" class="programs-list">
+      <p class="empty-state">Loading programs…</p>
+    </div>
+  </div>
+
+  <script>
+    function loadPrograms() {
+      fetch('/list-programs')
+        .then(r => r.json())
+        .then(programs => {
+          const container = document.getElementById('programs-list');
+          if (!programs || programs.length === 0) {
+            container.innerHTML = '<p class="empty-state">No programs saved yet. Create your first firing program!</p>';
+            return;
+          }
+          container.innerHTML = programs.map(p => `
+            <div class="program-card">
+              <div class="card-info">
+                <h3>${escHtml(p.name)}</h3>
+                <small>${escHtml(p.duration)}${p.created_date ? ' &nbsp;·&nbsp; ' + escHtml(p.created_date) : ''}</small>
+              </div>
+              <button onclick="editProgram('${escHtml(p.id)}')" class="button-on">Edit</button>
+            </div>
+          `).join('');
+        })
+        .catch(() => {
+          document.getElementById('programs-list').innerHTML =
+            '<p class="empty-state">Failed to load programs.</p>';
+        });
+    }
+
+    function editProgram(id) {
+      window.location.href = '/program-editor?id=' + encodeURIComponent(id);
+    }
+
+    function escHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    loadPrograms();
+  </script>
+</body>
+</html>

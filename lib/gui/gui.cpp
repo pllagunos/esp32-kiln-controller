@@ -33,7 +33,6 @@ namespace {
   bool selectPressed = false;  // Select button press state
   bool downPressed = false;    // Down button press state
   bool programOK;              // Is the program loaded correctly?
-  bool fileExists = true;      // Assume file exists initially 
   bool adjustingSV = false;    // Flag to know if SV is being adjusted
 
   int introSel = 1;            // Intro menu selected option (start or settings)
@@ -267,18 +266,17 @@ void gui_idle() {
     if (screen == "settings_program") {
       openProgram();
       readButtons();
+      int count = network.getProgramCount();
 
       if (upPressed) {
         if (programNumber > 1) {
           programNumber -= 1;
-          fileExists = true;
         }
         else screen = "settings";
         tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
       }
       if (downPressed) {
-        programNumber += 1;
-        fileExists = true;
+        if (count == 0 || programNumber < count) programNumber += 1;
         tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
       }
       if (selectPressed && programOK) {
@@ -567,6 +565,14 @@ void configScreen(int configSel) {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
   tftPrint("CONFIG", 2, 40);
+
+  // Show device IP address
+  tft.setTextSize(1);
+  String ip = network.get_captive_mode()
+    ? WiFi.softAPIP().toString()
+    : WiFi.localIP().toString();
+  tftPrint(ip, 2, 70);
+  tft.setTextSize(2);
   
   if (!network.get_captive_mode()) {
     text1 = "  START CAPTIVE PORTAL  ";
@@ -774,10 +780,11 @@ void disp_top_bar() {
 
 // disp_program: show program info on TFT
 void disp_program() {
+  int count = network.getProgramCount();
   tft.setCursor(20, 40);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-  tft.printf("SELECT PROGRAM: %i \n\n %s \n\n %s \n\n %s", programNumber, currentProgram.name.c_str(), currentProgram.duration.c_str(), currentProgram.createdDate.c_str());
+  tft.printf("PROG %i/%i:\n\n %s \n\n %s \n\n %s", programNumber, count, currentProgram.name.c_str(), currentProgram.duration.c_str(), currentProgram.createdDate.c_str());
 }
 
 //  disp_connecting: DISPLAYS CONNECTING MESSAGE
@@ -805,13 +812,17 @@ void disp_error_msg(String title, String message1, String message2) {
 
 // disp_program_error: show program error on TFT
 void disp_program_error() {
-    tft.setCursor(20, 40);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextSize(2);
-    tft.print(F("SELECT PROGRAM: "));
+  tft.setCursor(20, 40);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+  if (network.getProgramCount() == 0) {
+    tft.print(F("No programs saved.\nUse web UI to create\na firing program."));
+  } else {
+    tft.print(F("PROG "));
     tft.println(programNumber);
     tft.setCursor(20, 60);
-    tft.print(F("Can't find/open file"));
+    tft.print(F("Can't open file"));
+  }
 }
 
 //  RESETTFT: RESETS TFT WHEN CONTACTORS ARE OPENED (EMF) OR USER CALLS IT
@@ -888,58 +899,80 @@ void updateButtonState(int buttonPin, bool &buttonPressedFlag, int index) {
 
 //  openProgram: OPEN AND LOAD A FIRING PROGRAM FILE / DISPLAY ON SCREEN
 void openProgram() {
-  // Setup all variables
-  StaticJsonDocument<2048> json;
-  char filename[20];
-  sprintf(filename, "/firingProgram_%d.json", programNumber);
-
-  // Make sure you can open the file
-  if (!fileExists) {
-    disp_program_error;
-    programOK = false;
-    return;
-  }
-
-  fs::File myFile = SPIFFS.open(filename, FILE_READ); 
-  // Parse the JSON file
-  DeserializationError error = deserializeJson(json, myFile);
-
-  if (!myFile || error) {
-    fileExists = false;
+  int count = network.getProgramCount();
+  if (count == 0) {
     disp_program_error();
     programOK = false;
     return;
   }
 
-  // Load the data into currentProgram struct
-  currentProgram.name = json["name"].as<String>();
-  currentProgram.duration = json["duration"].as<String>();
-  currentProgram.createdDate = json["createdDate"].as<String>();
+  // Clamp to valid catalog range
+  if (programNumber < 1) programNumber = 1;
+  if (programNumber > count) programNumber = count;
 
-  currentProgram.segmentQuantity = json["segmentQuantity"].as<int>();
+  Network::ProgramCatalogEntry entry = network.getProgramEntry(programNumber);
+  if (entry.filename.isEmpty()) {
+    disp_program_error();
+    programOK = false;
+    return;
+  }
+
+  StaticJsonDocument<2048> json;
+  fs::File myFile = SPIFFS.open(entry.filename, FILE_READ);
+  if (!myFile) {
+    disp_program_error();
+    programOK = false;
+    return;
+  }
+
+  DeserializationError error = deserializeJson(json, myFile);
+  myFile.close();
+
+  if (error) {
+    disp_program_error();
+    programOK = false;
+    return;
+  }
+
+  currentProgram.name = json["name"] | String("Unnamed");
+  currentProgram.duration = json["duration"] | String("");
+
+  // Support both canonical (created_date) and legacy (createdDate) field names
+  const char* cd = json["created_date"];
+  currentProgram.createdDate = cd ? String(cd) : String(json["createdDate"] | "");
+
   JsonArray segmentsArray = json["segments"].as<JsonArray>();
-
-  for (int i = 0; i < currentProgram.segmentQuantity; i++) {
-    JsonObject segment = segmentsArray[i];
-    currentProgram.segments[i].firingRate = segment["firingRate"].as<int>();
-    currentProgram.segments[i].targetTemperature = segment["targetTemperature"].as<int>();
-    currentProgram.segments[i].holdingTime = segment["holdingTime"].as<int>();
-
-    // Fix Ramp values to show the correct sign
-    currentProgram.segments[i].firingRate = abs(currentProgram.segments[i].firingRate);
-    if (i >= 1) {
-      if (currentProgram.segments[i].targetTemperature < currentProgram.segments[i - 1].targetTemperature) {
-        currentProgram.segments[i].firingRate = -currentProgram.segments[i].firingRate;
-      }
+  int segCount = 0;
+  if (!segmentsArray.isNull()) {
+    segCount = min((int)segmentsArray.size(), maxSegments);
+    for (int i = 0; i < segCount; i++) {
+      JsonObject segment = segmentsArray[i];
+      int t = segment["target_temperature"] | 0;
+      if (t == 0) t = segment["targetTemperature"] | 0;
+      int r = segment["firing_rate"] | 0;
+      if (r == 0) r = segment["firingRate"] | 0;
+      int h = segment["holding_time"] | 0;
+      if (h == 0) h = segment["holdingTime"] | 0;
+      currentProgram.segments[i].targetTemperature = t;
+      currentProgram.segments[i].firingRate = abs(r);
+      currentProgram.segments[i].holdingTime = h;
+      // Negative rate for downward ramp segments
+      if (i >= 1 && t < currentProgram.segments[i - 1].targetTemperature)
+        currentProgram.segments[i].firingRate = -abs(r);
     }
+  } else {
+    segCount = json["segmentQuantity"] | 0;
+  }
+
+  currentProgram.segmentQuantity = segCount;
+  if (segCount == 0) {
+    disp_program_error();
+    programOK = false;
+    return;
   }
 
   programOK = true;
-  myFile.close();
-
-  // Display on the screen
   disp_program();
-
 }
 
 // Reset button: short press for TFT, 1.5s press for system

@@ -1,148 +1,287 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <title>Firing Schedule</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" type="text/css" href="style.css">
-    <style>
-        input[type=text],
-        input[type=number],
-        select {
-            width: 100%;
-            /* Use 100% width for inputs to fill their containers */
-            padding: 8px;
-            margin: 0;
-            display: inline-block;
-            /* Change to inline-block for better control */
-            border: 1px solid #ccc;
-            /* Add a border for visibility */
-            border-radius: 2px;
-            box-sizing: border-box;
-            /* Include padding and borders in the width */
-        }
-
-        ol {
-            padding: 0;
-            margin: 0;
-            list-style-type: decimal;
-        }
-
-        li {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 10px;
-            justify-content: flex-start;
-            /* Align to the start of the flex container */
-        }
-
-        li div {
-            display: flex;
-            flex-direction: column;
-            flex-basis: calc(33.3% - 10px);
-            /* Assign width to each flex item */
-            max-width: calc(33.3% - 10px);
-            /* Add max-width for flex items */
-        }
-
-        li span,
-        li div {
-            flex: 1;
-        }
-
-        .button-main {
-            width: 150px;
-            font-size: 0.9em;
-        }
-
-        .program-description {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            /* 2 columns on desktop */
-            gap: 10px;
-            /* space between grid items */
-            margin-bottom: 10px;
-            /* space below the grid */
-        }
-
-        /* Media query for mobile screens */
-        @media (max-width: 600px) {
-            li {
-                justify-content: flex-start;
-            }
-
-            li div {
-                margin-left: 10px;
-                /* Add left margin to div elements */
-            }
-
-            .button-main {
-                width: auto;
-                /* Allow button to adjust size on smaller screens */
-                flex-grow: 1;
-            }
-
-            .program-description {
-                grid-template-columns: 1fr;
-                /* 1 column on mobile */
-            }
-        }
-    </style>
+  <title>Firing Program Editor</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" type="text/css" href="style.css">
+  <style>
+    input[type=text], input[type=number], select {
+      width: 100%;
+      padding: 8px;
+      margin: 0;
+      border: 1px solid #ccc;
+      border-radius: 2px;
+      box-sizing: border-box;
+    }
+    ol { padding: 0; margin: 0; list-style-type: decimal; }
+    li {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      justify-content: flex-start;
+    }
+    li div {
+      display: flex;
+      flex-direction: column;
+      flex-basis: calc(33.3% - 10px);
+      max-width: calc(33.3% - 10px);
+    }
+    li span, li div { flex: 1; }
+    .program-description {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 10px;
+      max-width: 600px;
+      width: 100%;
+    }
+    #preview-svg {
+      display: block;
+      margin: 0.5em auto;
+      max-width: 300px;
+      width: 100%;
+    }
+    #duration-display {
+      font-size: 1rem;
+      color: #1282A2;
+      margin-bottom: 0.5em;
+    }
+    #status-msg {
+      min-height: 1.5em;
+      font-size: 0.95rem;
+      color: crimson;
+    }
+    @media (max-width: 600px) {
+      li div { flex-basis: 100%; max-width: 100%; }
+      .program-description { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
-
-<body class="firingProgram">
-    <div class="topnav">
-        <h1>Firing Schedule</h1>
+<body>
+  <div class="topnav">
+    <h1 id="page-title">Firing Program Editor</h1>
+  </div>
+  <div class="content">
+    <div class="page-nav">
+      <button onclick="window.location.href='/programs'" class="button-on">← Back</button>
+      <button onclick="window.location.href='/'" class="button-on">Home</button>
     </div>
+
+    <div class="program-description">
+      <div>
+        <label>Name</label>
+        <input type="text" id="prog-name" placeholder="e.g. Bisque Fire">
+      </div>
+      <div>
+        <label>Created Date</label>
+        <input type="text" id="prog-date" placeholder="e.g. 2024-01-15">
+      </div>
+    </div>
+
+    <div id="duration-display">Duration: —</div>
+    <svg id="preview-svg" viewBox="0 0 300 120" xmlns="http://www.w3.org/2000/svg">
+      <rect width="300" height="120" fill="#f5f5f5" rx="4"/>
+      <text x="150" y="65" text-anchor="middle" font-size="12" fill="#aaa">Add segments to see preview</text>
+    </svg>
+
     <br>
-    <form id="firingProgramForm" onsubmit="sendFiringProgram(); return false;">
-        <div class="program-description">
-            <div>
-                <input type="text" name="programNumber" id="programNumber" placeholder="Program Number" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
-                <input type="text" name="createdDate" placeholder="Created Date">
-            </div>
-            <div>
-                <input type="text" name="name" placeholder="Name">
-                <input type="text" name="duration" placeholder="Duration">
-            </div>
+    <ol id="segments"></ol>
+    <br>
+    <button class="button-segment" onclick="addSegment()">+ Add Segment</button>
+    <br><br>
+    <p id="status-msg"></p>
+    <button onclick="saveProgram()" class="button-main">Save Program</button>
+  </div>
+
+  <script>
+    const PAD = 15;
+    let editingId = null;
+
+    function getParams() {
+      const p = new URLSearchParams(window.location.search);
+      return { id: p.get('id') };
+    }
+
+    function setStatus(msg, isError) {
+      const el = document.getElementById('status-msg');
+      el.textContent = msg;
+      el.style.color = isError ? 'crimson' : '#034078';
+    }
+
+    function addSegment(data) {
+      const ol = document.getElementById('segments');
+      const idx = ol.children.length + 1;
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <div style="flex-basis:2em;max-width:2em;min-width:2em;">
+          <span>${idx}.</span>
         </div>
+        <div>
+          <label>Target (°C)</label>
+          <input type="number" min="0" max="1400" class="seg-target" value="${data ? data.target_temperature : ''}" oninput="recalculate()">
+        </div>
+        <div>
+          <label>Rate (°C/hr)</label>
+          <input type="number" min="1" max="500" class="seg-rate" value="${data ? data.firing_rate : ''}" oninput="recalculate()">
+        </div>
+        <div>
+          <label>Hold (min)</label>
+          <input type="number" min="0" class="seg-hold" value="${data ? data.holding_time : ''}" oninput="recalculate()">
+        </div>
+        <button class="button-main" onclick="removeSegment(this)">Remove</button>
+      `;
+      ol.appendChild(li);
+      renumber();
+      recalculate();
+    }
 
-        <br>
-        <ol id="segments">
-            <!-- Initial segment -->
-            <li>
-                <div class="counter">
-                    <span>1. </span>
-                </div>
-                <div>
-                    <label for="target1">Target (°C):</label>
-                    <input type="number" name="target1" id="target1" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
-                </div>
-                <div>
-                    <label for="speed1">Speed (°C/hr):</label>
-                    <input type="number" name="speed1" id="speed1" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
-                </div>
-                <div>
-                    <label for="hold1">Hold (min):</label>
-                    <input type="number" name="hold1" id="hold1" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
-                </div>
-                <!-- Button to remove this segment -->
-                <button class="button-main" onclick="removeSegment(this)">Remove</button>
-            </li>
-        </ol>
+    function removeSegment(btn) {
+      btn.closest('li').remove();
+      renumber();
+      recalculate();
+    }
 
-        <br><br>
+    function renumber() {
+      const items = document.getElementById('segments').children;
+      for (let i = 0; i < items.length; i++) {
+        items[i].querySelector('span').textContent = (i + 1) + '.';
+      }
+    }
 
-        <!-- Button to add a new segment -->
-        <button class="button-segment" onclick="addSegment(event)">Add Segment</button>
+    function getSegments() {
+      const segs = [];
+      document.querySelectorAll('#segments li').forEach(li => {
+        segs.push({
+          target_temperature: parseInt(li.querySelector('.seg-target').value) || 0,
+          firing_rate: parseInt(li.querySelector('.seg-rate').value) || 0,
+          holding_time: parseInt(li.querySelector('.seg-hold').value) || 0,
+        });
+      });
+      return segs;
+    }
 
-        <br><br>
+    function computeDuration(segs) {
+      let totalMins = 0, prevTemp = 20;
+      for (const seg of segs) {
+        const r = Math.abs(seg.firing_rate);
+        if (r > 0) totalMins += Math.abs(seg.target_temperature - prevTemp) * 60 / r;
+        totalMins += seg.holding_time;
+        prevTemp = seg.target_temperature;
+      }
+      return Math.round(totalMins);
+    }
 
-        <input type="submit" value="Submit">
-    </form>
-    <script src="script.js"></script>
+    function recalculate() {
+      const segs = getSegments();
+      const mins = computeDuration(segs);
+      const h = Math.floor(mins / 60), m = mins % 60;
+      document.getElementById('duration-display').textContent =
+        'Duration: ' + (h > 0 ? h + 'h ' : '') + m + 'min';
+      updatePreview(segs, mins);
+    }
+
+    function updatePreview(segs, totalMins) {
+      if (!segs.length) {
+        document.getElementById('preview-svg').innerHTML =
+          '<rect width="300" height="120" fill="#f5f5f5" rx="4"/>' +
+          '<text x="150" y="65" text-anchor="middle" font-size="12" fill="#aaa">Add segments to see preview</text>';
+        return;
+      }
+
+      const W = 300, H = 120;
+      const maxTemp = Math.max(20, ...segs.map(s => s.target_temperature));
+      const maxTime = Math.max(1, totalMins);
+
+      function scaleX(t) { return PAD + (t / maxTime) * (W - 2 * PAD); }
+      function scaleY(temp) { return (H - PAD) - (temp / maxTemp) * (H - 2 * PAD); }
+
+      let pts = [[0, 20]]; // start ambient
+      let t = 0, prevTemp = 20;
+      for (const seg of segs) {
+        const r = Math.abs(seg.firing_rate);
+        if (r > 0) t += Math.abs(seg.target_temperature - prevTemp) * 60 / r;
+        pts.push([t, seg.target_temperature]);
+        if (seg.holding_time > 0) {
+          t += seg.holding_time;
+          pts.push([t, seg.target_temperature]);
+        }
+        prevTemp = seg.target_temperature;
+      }
+
+      const d = pts.map((p, i) =>
+        (i === 0 ? 'M' : 'L') + scaleX(p[0]).toFixed(1) + ',' + scaleY(p[1]).toFixed(1)
+      ).join(' ');
+
+      // Axis labels
+      const tempLabel = maxTemp + '°C';
+      const timeLabel = Math.round(maxTime) + 'min';
+
+      document.getElementById('preview-svg').innerHTML = `
+        <rect width="${W}" height="${H}" fill="#f5f5f5" rx="4"/>
+        <line x1="${PAD}" y1="${PAD}" x2="${PAD}" y2="${H-PAD}" stroke="#ccc" stroke-width="1"/>
+        <line x1="${PAD}" y1="${H-PAD}" x2="${W-PAD}" y2="${H-PAD}" stroke="#ccc" stroke-width="1"/>
+        <text x="${PAD+2}" y="${PAD+10}" font-size="9" fill="#888">${tempLabel}</text>
+        <text x="${W-PAD-2}" y="${H-PAD-4}" font-size="9" fill="#888" text-anchor="end">${timeLabel}</text>
+        <path d="${d}" stroke="#034078" stroke-width="2" fill="none"/>
+      `;
+    }
+
+    function saveProgram() {
+      const name = document.getElementById('prog-name').value.trim();
+      const date = document.getElementById('prog-date').value.trim();
+      if (!name) { setStatus('Name is required.', true); return; }
+      const segs = getSegments();
+      if (!segs.length) { setStatus('Add at least one segment.', true); return; }
+      for (let i = 0; i < segs.length; i++) {
+        if (!segs[i].target_temperature) { setStatus('Segment ' + (i+1) + ': target temperature required.', true); return; }
+        if (!segs[i].firing_rate) { setStatus('Segment ' + (i+1) + ': firing rate required.', true); return; }
+      }
+
+      const payload = { name, created_date: date, segments: segs };
+      if (editingId) payload.existing_id = editingId;
+
+      setStatus('Saving…', false);
+      fetch('/save-program', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) { setStatus('Error: ' + data.error, true); return; }
+        editingId = data.id;
+        history.replaceState(null, '', '/program-editor?id=' + encodeURIComponent(data.id));
+        setStatus('Saved!', false);
+      })
+      .catch(() => setStatus('Save failed. Check connection.', true));
+    }
+
+    function loadProgram(id) {
+      fetch('/get-program?id=' + encodeURIComponent(id))
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) { setStatus('Load error: ' + data.error, true); return; }
+          editingId = data.id;
+          document.getElementById('prog-name').value = data.name || '';
+          document.getElementById('prog-date').value = data.created_date || '';
+          document.getElementById('page-title').textContent = 'Edit: ' + (data.name || 'Program');
+          const ol = document.getElementById('segments');
+          ol.innerHTML = '';
+          (data.segments || []).forEach(s => addSegment(s));
+        })
+        .catch(() => setStatus('Failed to load program.', true));
+    }
+
+    // Init
+    const { id } = getParams();
+    if (id) {
+      loadProgram(id);
+    } else {
+      addSegment(); // start with one blank segment for new programs
+    }
+  </script>
 </body>
-
 </html>

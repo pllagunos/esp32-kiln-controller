@@ -29,8 +29,18 @@ public:
   }
 };
 
+static constexpr int PROGRAM_CATALOG_MAX = 30;
+
 class Network {
 public:
+  struct ProgramCatalogEntry {
+    String id;
+    String filename;
+    String name;
+    String createdDate;
+    String duration;
+  };
+
   Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem);
 
   void setupServer();
@@ -53,6 +63,10 @@ public:
   bool hasNewInfluxCredentials() const;
   void clearInfluxCredentialsFlag();
 
+  void refreshCatalog();
+  int getProgramCount();
+  ProgramCatalogEntry getProgramEntry(int oneBasedIndex);
+
 private:
   SemaphoreHandle_t& sharedMutex;
   fs::FS& fileSystem; 
@@ -73,6 +87,15 @@ private:
   bool receivedCredentials = false;
   bool receivedInfluxCredentials = false;
   unsigned long lastSSIDUpdate;
+
+  ProgramCatalogEntry catalog_[PROGRAM_CATALOG_MAX];
+  int catalogSize_ = 0;
+  bool catalogLoaded_ = false;
+  String pendingBody_;
+
+  String makeSlug(const String& name, const String& date);
+  String uniqueSlug(const String& base);
+  String handleSaveProgramBody(const String& body);
 };
 
 #endif 

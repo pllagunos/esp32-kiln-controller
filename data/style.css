@@ -151,3 +151,37 @@ fieldset {
   text-align: center;
 }
 
+.page-nav {
+  display: flex;
+  gap: 0.5em;
+  justify-content: flex-start;
+  margin-bottom: 1em;
+}
+
+.program-card {
+  background: white;
+  border-radius: 4px;
+  box-shadow: 2px 2px 8px rgba(140,140,140,.4);
+  padding: 1em 1.5em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1em;
+  text-align: left;
+}
+
+.program-card .card-info {
+  flex: 1;
+}
+
+.program-card .card-info h3 {
+  margin: 0 0 0.25em;
+  color: #034078;
+  font-size: 1.1rem;
+}
+
+.program-card .card-info small {
+  color: #666;
+  font-size: 0.85rem;
+}
+
