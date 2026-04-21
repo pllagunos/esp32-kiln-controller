@@ -271,11 +271,13 @@ void Network::setupServer() {
     },
     nullptr,
     [this](AsyncWebServerRequest* /*request*/, uint8_t* data, size_t len, size_t index, size_t total) {
+      const size_t MAX_BODY = 8192;
       if (index == 0) {
         pendingBody_ = "";
-        pendingBody_.reserve(total);
+        if (total <= MAX_BODY) pendingBody_.reserve(total);
       }
-      for (size_t i = 0; i < len; i++) pendingBody_ += (char)data[i];
+      if (pendingBody_.length() + len <= MAX_BODY)
+        for (size_t i = 0; i < len; i++) pendingBody_ += (char)data[i];
     }
   );
 
@@ -667,15 +669,24 @@ void Network::refreshCatalog() {
     f = root.openNextFile();
   }
 
-  // Read metadata from each matched file
+  // Read metadata from each matched file — only parse name/date/duration, skip segments
+  StaticJsonDocument<64> filter;
+  filter["name"] = true;
+  filter["created_date"] = true;
+  filter["createdDate"] = true;
+  filter["duration"] = true;
+
   for (int i = 0; i < fc && catalogSize_ < PROGRAM_CATALOG_MAX; i++) {
     File pf = fileSystem.open(fnames[i], FILE_READ);
     if (!pf) continue;
 
-    StaticJsonDocument<1024> pdoc;
-    bool ok = (deserializeJson(pdoc, pf) == DeserializationError::Ok);
+    DynamicJsonDocument pdoc(256);
+    bool ok = (deserializeJson(pdoc, pf, DeserializationOption::Filter(filter)) == DeserializationError::Ok);
     pf.close();
-    if (!ok) continue;
+    if (!ok) {
+      Serial.printf("Catalog: skipping %s (parse error)\n", fnames[i].c_str());
+      continue;
+    }
 
     ProgramCatalogEntry& e = catalog_[catalogSize_];
     e.filename   = fnames[i];
@@ -758,8 +769,6 @@ String Network::handleSaveProgramBody(const String& body) {
   } else {
     finalSlug     = uniqueSlug(baseSlug);
     finalFilename = "/prog_" + finalSlug + ".json";
-    if (!existingFile.isEmpty() && existingFile != finalFilename)
-      fileSystem.remove(existingFile);
   }
 
   // Build canonical document
@@ -781,13 +790,19 @@ String Network::handleSaveProgramBody(const String& body) {
     os["holding_time"]       = h;
   }
 
+  // Write new file before touching the old one — prevents data loss on write failure
   File wf = fileSystem.open(finalFilename, FILE_WRITE);
   if (!wf) return "{\"error\":\"Failed to open file for writing\"}";
-  if (serializeJson(out, wf) == 0) {
-    wf.close();
+  size_t written = serializeJson(out, wf);
+  wf.close();
+  if (written == 0) {
+    fileSystem.remove(finalFilename); // clean up zero-byte artifact
     return "{\"error\":\"Failed to write JSON\"}";
   }
-  wf.close();
+
+  // Only delete the old file after the new one is confirmed written
+  if (!existingFile.isEmpty() && existingFile != finalFilename)
+    fileSystem.remove(existingFile);
 
   // Invalidate catalog so next access rebuilds it
   catalogLoaded_ = false;

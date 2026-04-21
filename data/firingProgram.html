@@ -77,7 +77,7 @@
       </div>
       <div>
         <label>Created Date</label>
-        <input type="text" id="prog-date" placeholder="e.g. 2024-01-15">
+        <input type="date" id="prog-date">
       </div>
     </div>
 
@@ -280,6 +280,8 @@
     if (id) {
       loadProgram(id);
     } else {
+      // Default to today for new programs
+      document.getElementById('prog-date').value = new Date().toISOString().split('T')[0];
       addSegment(); // start with one blank segment for new programs
     }
   </script>
