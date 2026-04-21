@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" type="text/css" href="style.css">
   <style>
-    input[type=text], input[type=number], select {
+    input[type=text], input[type=number], input[type=date], select {
       width: 100%;
       padding: 8px;
       margin: 0;
@@ -97,7 +97,6 @@
   </div>
 
   <script>
-    const PAD = 15;
     let editingId = null;
 
     function getParams() {
@@ -183,22 +182,48 @@
       updatePreview(segs, mins);
     }
 
+    function niceTempInterval(maxTemp) {
+      for (const step of [5, 10, 20, 25, 50, 100, 150, 200, 250, 300, 500]) {
+        const n = Math.floor(maxTemp / step);
+        if (n >= 2 && n <= 6) return step;
+      }
+      return Math.max(1, Math.floor(maxTemp / 2));
+    }
+
+    function niceTimeInterval(totalMins) {
+      for (const step of [5, 10, 15, 30, 60, 90, 120, 180, 240, 360, 480]) {
+        const n = Math.floor(totalMins / step);
+        if (n >= 2 && n <= 6) return step;
+      }
+      return Math.max(1, Math.floor(totalMins / 2));
+    }
+
+    function fmtHHMM(mins) {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return h + ':' + String(m).padStart(2, '0');
+    }
+
     function updatePreview(segs, totalMins) {
+      const svg = document.getElementById('preview-svg');
       if (!segs.length) {
-        document.getElementById('preview-svg').innerHTML =
-          '<rect width="300" height="120" fill="#f5f5f5" rx="4"/>' +
+        svg.setAttribute('viewBox', '0 0 300 120');
+        svg.innerHTML = '<rect width="300" height="120" fill="#f5f5f5" rx="4"/>' +
           '<text x="150" y="65" text-anchor="middle" font-size="12" fill="#aaa">Add segments to see preview</text>';
         return;
       }
 
-      const W = 300, H = 120;
+      const W = 300, H = 140;
+      const L = 30, R = 6, T = 8, B = 22;
+      svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
       const maxTemp = Math.max(20, ...segs.map(s => s.target_temperature));
       const maxTime = Math.max(1, totalMins);
 
-      function scaleX(t) { return PAD + (t / maxTime) * (W - 2 * PAD); }
-      function scaleY(temp) { return (H - PAD) - (temp / maxTemp) * (H - 2 * PAD); }
+      function scaleX(t) { return L + (t / maxTime) * (W - L - R); }
+      function scaleY(temp) { return (H - B) - (temp / maxTemp) * (H - T - B); }
 
-      let pts = [[0, 20]]; // start ambient
+      let pts = [[0, 20]];
       let t = 0, prevTemp = 20;
       for (const seg of segs) {
         const r = Math.abs(seg.firing_rate);
@@ -215,18 +240,35 @@
         (i === 0 ? 'M' : 'L') + scaleX(p[0]).toFixed(1) + ',' + scaleY(p[1]).toFixed(1)
       ).join(' ');
 
-      // Axis labels
-      const tempLabel = maxTemp + '°C';
-      const timeLabel = Math.round(maxTime) + 'min';
+      const tempStep = niceTempInterval(maxTemp);
+      const timeStep = niceTimeInterval(maxTime);
 
-      document.getElementById('preview-svg').innerHTML = `
-        <rect width="${W}" height="${H}" fill="#f5f5f5" rx="4"/>
-        <line x1="${PAD}" y1="${PAD}" x2="${PAD}" y2="${H-PAD}" stroke="#ccc" stroke-width="1"/>
-        <line x1="${PAD}" y1="${H-PAD}" x2="${W-PAD}" y2="${H-PAD}" stroke="#ccc" stroke-width="1"/>
-        <text x="${PAD+2}" y="${PAD+10}" font-size="9" fill="#888">${tempLabel}</text>
-        <text x="${W-PAD-2}" y="${H-PAD-4}" font-size="9" fill="#888" text-anchor="end">${timeLabel}</text>
-        <path d="${d}" stroke="#034078" stroke-width="2" fill="none"/>
-      `;
+      let out = `<rect width="${W}" height="${H}" fill="#f5f5f5" rx="4"/>`;
+
+      // Y gridlines + temperature labels
+      for (let temp = tempStep; temp <= maxTemp; temp += tempStep) {
+        const y = scaleY(temp).toFixed(1);
+        out += `<line x1="${L}" y1="${y}" x2="${W - R}" y2="${y}" stroke="#e0e0e0" stroke-width="0.5"/>`;
+        out += `<text x="${L - 3}" y="${(parseFloat(y) + 2.5).toFixed(1)}" font-size="7" fill="#888" text-anchor="end">${temp}</text>`;
+      }
+
+      // X gridlines + HH:MM labels
+      for (let tk = timeStep; tk <= maxTime; tk += timeStep) {
+        const x = scaleX(tk).toFixed(1);
+        if (tk < maxTime) {
+          out += `<line x1="${x}" y1="${T}" x2="${x}" y2="${H - B}" stroke="#e0e0e0" stroke-width="0.5"/>`;
+        }
+        out += `<text x="${x}" y="${H - B + 9}" font-size="7" fill="#888" text-anchor="middle">${fmtHHMM(tk)}</text>`;
+      }
+
+      // Axes
+      out += `<line x1="${L}" y1="${T}" x2="${L}" y2="${H - B}" stroke="#ccc" stroke-width="1"/>`;
+      out += `<line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}" stroke="#ccc" stroke-width="1"/>`;
+
+      // Firing curve (drawn last, on top of gridlines)
+      out += `<path d="${d}" stroke="#034078" stroke-width="2" fill="none"/>`;
+
+      svg.innerHTML = out;
     }
 
     function saveProgram() {
