@@ -2,21 +2,13 @@
 #include <SPI.h>
 #include <TFT_eSPI.h>
 #include <ArduinoJson.h>
+#include <FS.h>
+#include <SPIFFS.h>
 
 #include "userSetup.h"
 #include "common.h"
 
-// fix the include errors from network, but WHY
-#include <AsyncTCP.h>
-#include <DNSServer.h>
-#include <ESPAsyncWebServer.h>
-#include <WiFiMulti.h>
-#include <FS.h>          
-#include <SPIFFS.h>      
-#include <set>
-#include <PID_v1.h>
-#include "network.h" // This causes circular dependency
-
+#include "network.h"
 #include "heat_control.h"
 #include "gui.h"
 

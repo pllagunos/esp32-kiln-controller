@@ -14,8 +14,6 @@
 #include "common.h"
 #include "userSetup.h"
 
-#include "gui.h"
-
 class CaptiveRequestHandler : public AsyncWebHandler {
 public:
   CaptiveRequestHandler() {}
