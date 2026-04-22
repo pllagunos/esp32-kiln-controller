@@ -31,6 +31,9 @@ static constexpr int PROGRAM_CATALOG_MAX = 30;
 
 class Network {
 public:
+
+  Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem);
+
   struct ProgramCatalogEntry {
     String id;
     String filename;
@@ -38,9 +41,7 @@ public:
     String createdDate;
     String duration;
   };
-
-  Network(SemaphoreHandle_t& mutex, fs::FS& fileSystem);
-
+  
   void setupServer();
   void StartCaptivePortal();
   void getSSIDs();

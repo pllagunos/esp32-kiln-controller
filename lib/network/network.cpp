@@ -21,7 +21,7 @@ bool Network::checkWiFi() {
   if (!captive_mode)
   {
     if (receivedCredentials) {
-      Serial.println("Credentials changed. Initializing WiFi again.");
+      log_i("Credentials changed. Initializing WiFi again.\n");
       receivedCredentials = false;
       loadWifiCredentials();
     }
@@ -33,7 +33,7 @@ bool Network::checkWiFi() {
     
     for (uint8_t attempt = 0; attempt < 3; attempt++) {
       if (wifiMulti.run() != WL_CONNECTED) {
-        Serial.print(".");
+        log_i(".");
         firstConnection = true;
         delay(300);
       } 
@@ -41,13 +41,13 @@ bool Network::checkWiFi() {
         connected = true;
         if (firstConnection) {
           firstConnection = false;
-          Serial.printf("Connected to: %s\nIP address: %s\n", WiFi.SSID(), WiFi.localIP().toString().c_str());
+          log_i("Connected to: %s\nIP address: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
           if (!server_started) {
             setupServer();
             server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
             server.begin();
             server_started = true;
-            Serial.println("Web server started at http://" + WiFi.localIP().toString());
+            log_i("Web server started at http://%s\n", WiFi.localIP().toString().c_str());
           }
         }
         break;
@@ -353,25 +353,24 @@ void Network::setupServer() {
 
 // Starts captive portal in AP mode
 void Network::StartCaptivePortal() {
-  Serial.println("Setting up AP Mode");
+  log_i("Setting up AP Mode\n");
 
   WiFi.mode(WIFI_AP);
   WiFi.softAP("The Kiln Controller", NULL);
-  Serial.print("AP IP address: ");
-  Serial.println(WiFi.softAPIP());
+  log_i("AP IP address: %s\n", WiFi.softAPIP().toString().c_str());
 
-  Serial.println("Starting DNS Server");
+  log_i("Starting DNS Server\n");
   dnsServer.start(53, "*", WiFi.softAPIP());
 
   if (!server_started) {
-    Serial.println("Setting up Async WebServer");
+    log_i("Setting up Async WebServer\n");
     setupServer();
     server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
     server.begin();
     server_started = true;
   }
 
-  Serial.println("Done!");
+  log_i("Done!\n");
 }
 
 // Generates a JSON array with the first 5 unique SSIDs
@@ -404,7 +403,7 @@ void Network::getSSIDs() {
   }
   ssidList += "}";
 
-  // Serial.printf("Updated SSID list:\n %s \n ", ssidList.c_str());
+  // log_i("Updated SSID list:\n %s \n ", ssidList.c_str());
 }
 
 // Find the position of the first digit in the parameter name
@@ -421,7 +420,7 @@ int Network::extractSegmentNumber(const String& paramName) {
 
 // Saves firing program as JSON file to the fileSystem
 void Network::saveConfigFile() {
-  Serial.println(F("Saving config"));
+  log_i("Saving config\n");
   StaticJsonDocument<2048> json;
   json["name"] = serverProgram.name;
   json["duration"] = serverProgram.duration;
@@ -440,17 +439,18 @@ void Network::saveConfigFile() {
   String fileName = "/firingProgram_" + String(serverProgram.programNumber) + ".json";
   fs::File configFile = fileSystem.open(fileName, FILE_WRITE);
   if (!configFile) {
-    Serial.println("failed to open config file for writing");
+    log_i("failed to open config file for writing\n");
   }
 
   serializeJsonPretty(json, Serial);
   if (serializeJson(json, configFile) == 0) {
-    Serial.println(F("Failed to write to file"));
+    log_i("Failed to write to file\n");
   }
-  Serial.println();
+  log_i("\n");
   configFile.close();
 }
 
+// Adds or updates WiFi credentials in the JSON file
 void Network::addWifiCredentials(const String& ssid, const String& password) {
   StaticJsonDocument<2048> json;
   String fileName = "/wifi_credentials.json";
@@ -463,7 +463,7 @@ void Network::addWifiCredentials(const String& ssid, const String& password) {
     if (cred["ssid"].as<String>() == ssid) {
       cred["password"] = password;  // Update password
       ssidFound = true;
-      Serial.println("Updated existing credentials");
+      log_i("Updated existing credentials\n");
       break;
     }
   }
@@ -473,17 +473,17 @@ void Network::addWifiCredentials(const String& ssid, const String& password) {
     JsonObject newCred = json.createNestedObject();
     newCred["ssid"] = ssid;
     newCred["password"] = password;
-    Serial.println("Added new credentials");
+    log_i("Added new credentials\n");
   }
 
   // Save the updated credentials back to the file
   fs::File credentialsFile = fileSystem.open(fileName, FILE_WRITE);
   if (!credentialsFile) {
-    Serial.println("Failed to open config file for writing");
+    log_i("Failed to open config file for writing\n");
   }
 
   if (!serializeJson(json, credentialsFile)) {
-    Serial.println(F("Failed to write to file"));
+    log_i("Failed to write to file\n");
   }
   serializeJsonPretty(json, Serial);
   Serial.println();
@@ -494,18 +494,18 @@ void Network::addWifiCredentials(const String& ssid, const String& password) {
 void Network::parseJson(StaticJsonDocument<2048>& json, const String& path) {
   fs::File file = fileSystem.open(path, FILE_READ);
   if (!file) {
-    Serial.println("- failed to open file for reading");
+    log_i("- failed to open file for reading\n");
     return;
   }
   
   DeserializationError error = deserializeJson(json, file);
   if (error) {
-    Serial.println("Failed to parse JSON, creating new JSON array");
+    log_i("Failed to parse JSON, creating new JSON array\n");
     json.clear();
     return;
   }
 
-  Serial.printf("\n %s \n", path.c_str());
+  log_i("\n %s \n", path.c_str());
   serializeJsonPretty(json, Serial);
   Serial.println();
   file.close();
@@ -517,7 +517,7 @@ void Network::loadInfluxDbCredentials() {
   parseJson(json, "/influxdb_credentials.json");
 
   if (json.isNull() || !json.containsKey("url")) {
-    Serial.println("No InfluxDB credentials found. Publishing disabled until configured.");
+    log_i("No InfluxDB credentials found. Publishing disabled until configured.\n");
     g_influxConfig.configured = false;
     return;
   }
@@ -528,7 +528,7 @@ void Network::loadInfluxDbCredentials() {
   g_influxConfig.bucket   = json["bucket"] | "";
   g_influxConfig.tzInfo   = json["tzInfo"] | "UTC0";
   g_influxConfig.configured = !g_influxConfig.url.isEmpty() && !g_influxConfig.token.isEmpty();
-  Serial.printf("InfluxDB credentials loaded. URL: %s\n", g_influxConfig.url.c_str());
+  log_i("InfluxDB credentials loaded. URL: %s\n", g_influxConfig.url.c_str());
 }
 
 // saveInfluxDbCredentials() - saves InfluxDB credentials as JSON to SPIFFS
@@ -542,11 +542,11 @@ void Network::saveInfluxDbCredentials(const String& url, const String& token, co
 
   fs::File file = fileSystem.open("/influxdb_credentials.json", FILE_WRITE);
   if (!file) {
-    Serial.println("Failed to open influxdb_credentials.json for writing");
+    log_i("Failed to open influxdb_credentials.json for writing\n");
     return;
   }
   if (!serializeJson(json, file)) {
-    Serial.println(F("Failed to write InfluxDB credentials"));
+    log_i("Failed to write InfluxDB credentials\n");
   }
   serializeJsonPretty(json, Serial);
   Serial.println();
@@ -600,53 +600,54 @@ bool Network::get_captive_mode() const {
   return captive_mode;
 }
 
+// helper functions for catalog and slug filenames (not methods of Network, no access to member variables)
 namespace {
-constexpr size_t PROGRAM_PATH_MAX_LEN = 31;
-constexpr size_t PROGRAM_FILE_FIXED_LEN =
-    (sizeof("/prog_") - 1) + (sizeof(".json") - 1);
-constexpr size_t PROGRAM_FILE_SLUG_MAX_LEN =
-    PROGRAM_PATH_MAX_LEN - PROGRAM_FILE_FIXED_LEN;
+  constexpr size_t PROGRAM_PATH_MAX_LEN = 31;
+  constexpr size_t PROGRAM_FILE_FIXED_LEN =
+      (sizeof("/prog_") - 1) + (sizeof(".json") - 1);
+  constexpr size_t PROGRAM_FILE_SLUG_MAX_LEN =
+      PROGRAM_PATH_MAX_LEN - PROGRAM_FILE_FIXED_LEN;
 
-String trimProgramFileSlug(String slug, size_t maxLen) {
-  if (slug.length() > maxLen) slug = slug.substring(0, maxLen);
-  while (slug.length() > 0 && slug.charAt(slug.length() - 1) == '-')
-    slug.remove(slug.length() - 1);
-  if (slug.isEmpty()) slug = "program";
-  if (slug.length() > maxLen) slug = slug.substring(0, maxLen);
-  return slug;
-}
-
-String programFilenameForSlug(const String& slug) {
-  return "/prog_" + slug + ".json";
-}
-
-String programSlugFromFilename(const String& filename) {
-  if (!filename.startsWith("/prog_") || !filename.endsWith(".json")) return "";
-  return filename.substring(6, filename.length() - 5);
-}
-
-uint32_t programTempHash(const String& slug) {
-  uint32_t hash = 2166136261u;
-  for (unsigned int i = 0; i < slug.length(); i++) {
-    hash ^= (uint8_t)slug.charAt(i);
-    hash *= 16777619u;
+  String trimProgramFileSlug(String slug, size_t maxLen) {
+    if (slug.length() > maxLen) slug = slug.substring(0, maxLen);
+    while (slug.length() > 0 && slug.charAt(slug.length() - 1) == '-')
+      slug.remove(slug.length() - 1);
+    if (slug.isEmpty()) slug = "program";
+    if (slug.length() > maxLen) slug = slug.substring(0, maxLen);
+    return slug;
   }
-  return hash;
-}
 
-String tempProgramPath(const char* prefix, const String& slug) {
-  char hashHex[9];
-  snprintf(hashHex, sizeof(hashHex), "%08lx", (unsigned long)programTempHash(slug));
-  return String(prefix) + hashHex + ".json";
-}
+  String programFilenameForSlug(const String& slug) {
+    return "/prog_" + slug + ".json";
+  }
 
-String tempProgramFilename(const String& slug) {
-  return tempProgramPath("/tmpw_", slug);
-}
+  String programSlugFromFilename(const String& filename) {
+    if (!filename.startsWith("/prog_") || !filename.endsWith(".json")) return "";
+    return filename.substring(6, filename.length() - 5);
+  }
 
-String backupProgramFilename(const String& slug) {
-  return tempProgramPath("/tmpb_", slug);
-}
+  uint32_t programTempHash(const String& slug) {
+    uint32_t hash = 2166136261u;
+    for (unsigned int i = 0; i < slug.length(); i++) {
+      hash ^= (uint8_t)slug.charAt(i);
+      hash *= 16777619u;
+    }
+    return hash;
+  }
+
+  String tempProgramPath(const char* prefix, const String& slug) {
+    char hashHex[9];
+    snprintf(hashHex, sizeof(hashHex), "%08lx", (unsigned long)programTempHash(slug));
+    return String(prefix) + hashHex + ".json";
+  }
+
+  String tempProgramFilename(const String& slug) {
+    return tempProgramPath("/tmpw_", slug);
+  }
+
+  String backupProgramFilename(const String& slug) {
+    return tempProgramPath("/tmpb_", slug);
+  }
 }  // namespace
 
 // makeSlug: converts a program name + date into a filesystem-safe identifier
@@ -753,7 +754,7 @@ void Network::refreshCatalog() {
     bool ok = (deserializeJson(pdoc, pf, DeserializationOption::Filter(filter)) == DeserializationError::Ok);
     pf.close();
     if (!ok) {
-      Serial.printf("Catalog: skipping %s (parse error)\n", fnames[i].c_str());
+      log_i("Catalog: skipping %s (parse error)\n", fnames[i].c_str());
       continue;
     }
 
@@ -779,14 +780,16 @@ void Network::refreshCatalog() {
     catalogSize_++;
   }
 
-  Serial.printf("Catalog refreshed: %d program(s)\n", catalogSize_);
+  log_i("Catalog refreshed: %d program(s)\n", catalogSize_);
 }
 
+// returns catalog size = number of saved programs
 int Network::getProgramCount() {
   if (!catalogLoaded_) refreshCatalog();
   return catalogSize_;
 }
 
+// returns program metadata for the given 1-based index, or empty entry if out of range
 Network::ProgramCatalogEntry Network::getProgramEntry(int oneBasedIndex) {
   if (!catalogLoaded_) refreshCatalog();
   if (oneBasedIndex < 1 || oneBasedIndex > catalogSize_) return ProgramCatalogEntry{};
@@ -962,6 +965,6 @@ String Network::handleSaveProgramBody(const String& body) {
   catalogLoaded_ = false;
   refreshCatalog();
 
-  Serial.printf("Saved program '%s' → %s\n", name, finalFilename.c_str());
+  log_i("Saved program '%s' → %s\n", name, finalFilename.c_str());
   return "{\"id\":\"" + finalId + "\"}";
 }

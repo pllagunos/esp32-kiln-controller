@@ -93,11 +93,11 @@ void heat_control::checkDoor() {
     if (!isOnHold) {
       rampStart = millis() - (lastRampHours * 3600000);
       double newRampHours = (millis() - rampStart) / 3600000.0;
-      // Serial.printf("new rampHours: %.6f \n", newRampHours);
+      // log_i("new rampHours: %.6f \n", newRampHours);
     } else {
       holdStart = millis() - (lastHoldMins * 60000);
       holdMins = (millis() - holdStart) / 60000.0;
-      // Serial.printf("holdMins: %.0f \n", holdMins);
+      // log_i("holdMins: %.0f \n", holdMins);
     }
   }
 }
@@ -119,7 +119,7 @@ void heat_control::updatePIDs() {
     // If before it was closed, pause ramp time measurement (when ramping)
     if (doorClosed_before && !isOnHold) {
       lastRampHours = (millis() - rampStart) / 3600000.0;
-      // Serial.printf("lastRampHours saved. last rampHours: %.6f \n", lastRampHours);
+      // log_i("lastRampHours saved. last rampHours: %.6f \n", lastRampHours);
     }
     return;
   }
@@ -177,7 +177,7 @@ void heat_control::updateSeg() {
   // If door has just been opened (perhaps implement similar method to lastTemp = pidInput;)
   if (!doorClosed && doorClosed_before) {
     lastHoldMins = (millis() - holdStart) / 60000.0;
-    // Serial.printf("lastHoldMins saved. last holdMins: %.0f \n", lastHoldMins);
+    // log_i("lastHoldMins saved. last holdMins: %.0f \n", lastHoldMins);
   }
 
   // Check if complete -> turn off all zones
@@ -219,7 +219,7 @@ void heat_control::logData() {
   // Open file for appending
   // File file = SPIFFS.open("/data.csv", FILE_APPEND);
   // if (!file) {
-  //   Serial.println("Failed to open file for appending");
+  //   log_i("Failed to open file for appending\n");
   //   return;
   // }
   // file.printf("%02d:%02d:%02d,%.2f,%.2f,%.2f,\n", 
