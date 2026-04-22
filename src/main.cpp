@@ -21,7 +21,11 @@ int g_segNum;
 bool g_connected;
 bool g_connecting;
 bool g_published;
-bool g_fault;
+char g_tcType;
+bool g_tcInitialized;
+char g_initErr[64];
+bool g_tcFault;
+uint8_t g_tcFaultCode;
 
 // External objects initialization
 FiringProgram currentProgram;
@@ -31,6 +35,7 @@ String g_ota_latest_version;
 String g_ota_latest_tag;
 SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
 SemaphoreHandle_t disp_mutex = xSemaphoreCreateMutex();
+SemaphoreHandle_t g_spiMutex = xSemaphoreCreateMutex();
 heat_control controller(mutex);
 Network network(mutex, SPIFFS);
 
@@ -43,7 +48,7 @@ void setup() {
   SPI.begin();
 
   delay(1500);
-  gui_start();
+  gui_start(); // also seeds g_tcType from preferences (falls back to TC_DEFAULT_TYPE)
 
   // Mount SPIFFS file system
   while (!SPIFFS.begin(true)) {

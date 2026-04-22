@@ -23,7 +23,7 @@ void heat_control::run() {
   // Synchonize shared task variables
   xSemaphoreTake(mutex, portMAX_DELAY);  // Wait for the semaphore to become available
   pidInput = g_pidInput;
-  fault = g_fault;
+  fault = g_tcFault;
   g_pidOutput = pidOutput;
   g_pidSetPoint = pidSetPoint;
   g_segNum = segNum;

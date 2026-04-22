@@ -15,6 +15,7 @@ void modeScreen(int modeSel);
 void settingsScreen(int sel);
 void actionScreen(int actionSel);
 void configScreen(int configSel);
+void tcTypeScreen();
 void runningScreen();
 
 void disp_top_bar();

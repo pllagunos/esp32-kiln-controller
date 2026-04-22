@@ -47,17 +47,22 @@ extern InfluxDbConfig g_influxConfig; // InfluxDB connection settings loaded fro
 extern OtaStatus g_ota_status;        // OTA state machine status
 extern String g_ota_latest_version;   // Latest release name from GitHub
 extern String g_ota_latest_tag;       // Latest release tag from GitHub
-extern SemaphoreHandle_t mutex;      // For thread safety
-extern SemaphoreHandle_t disp_mutex; // For display calls
+extern SemaphoreHandle_t mutex;        // For thread safety
+extern SemaphoreHandle_t disp_mutex;   // For display calls
+extern SemaphoreHandle_t g_spiMutex;   // SPI bus mutex for thermocouple chip transactions
 
 /* global variables: used between concurrent tasks -> mutex */
-extern double g_pidInput;            // Input for PID loop (actual temp reading from tc).
-extern double g_pidOutput;           // Output for PID loop (relay for heater).
-extern double g_pidSetPoint;         // Setpoint for PID loop (temp you are trying to reach).
-extern int g_segNum;                 // Current segment number running in firing program.  0 means a program hasn't been selected yet.
-extern bool g_connected;             // Is the ESP connected to WiFi?
-extern bool g_connecting;            // Is the ESP trying to connect to WiFi
-extern bool g_published;             // Is the ESP publishing to InfluxDB?
-extern bool g_fault;                 // Is there a fault that needs to be known across threads?
+extern double g_pidInput;              // Input for PID loop (actual temp reading from tc).
+extern double g_pidOutput;             // Output for PID loop (relay for heater).
+extern double g_pidSetPoint;           // Setpoint for PID loop (temp you are trying to reach).
+extern int g_segNum;                   // Current segment number running in firing program.
+extern bool g_connected;               // Is the ESP connected to WiFi?
+extern bool g_connecting;              // Is the ESP trying to connect to WiFi
+extern bool g_published;               // Is the ESP publishing to InfluxDB?
+extern char g_tcType;                  // Runtime thermocouple type (single char: B E J K N R S T)
+extern bool g_tcInitialized;           // True when the thermocouple driver is ready to read
+extern char g_initErr[64];             // Human-readable init or runtime fault message
+extern bool g_tcFault;                 // Active thermocouple fault (safety-critical)
+extern uint8_t g_tcFaultCode;          // Raw MAX31856 fault bitmask (0 for ADS1220)
 
 #endif

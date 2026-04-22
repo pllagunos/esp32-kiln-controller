@@ -33,6 +33,7 @@ namespace {
   int settingsSel = 1;         // Settings menu selected setting
   int actionSel = 1;           // Option selected from action screen
   int configSel = 1;
+  int tcTypeSel = 0;             // Index into tcTypes[] on TC type screen
   int screenNum = 1;           // Screen number displayed during firing (1 = temps / 2 = program info / 3 = tools / 4 = done
   int optionNum = 1;           // Option selected from screen #3
   int programNumber;           // Current firing program number.  This ties to the file name
@@ -75,6 +76,7 @@ void gui_start() {
   firingMode = static_cast<FiringModes>(preferences.getInt("firingMode", static_cast<int>(FiringModes::automatic))); 
   tempSV = preferences.getInt("tempSV", 25);
   action = preferences.getInt("action", 0); // 0 = X
+  g_tcType = (char)preferences.getInt("tcType", (int)TC_DEFAULT_TYPE);
 }
 
 void gui_run() {
@@ -321,19 +323,50 @@ void gui_idle() {
 
       if (upPressed && configSel != 1)
         configSel -= 1;
-      if (downPressed && configSel != 2)
+      if (downPressed && configSel != 3)
         configSel += 1;
       if (selectPressed) {
         // toggled captive mode
         if (configSel == 1) {
           network.handleCaptiveModeToggle();
         }
-        // user pressed DONE
+        // enter TC type selection
         if (configSel == 2) {
+          // seed tcTypeSel to the current g_tcType index
+          static const char tcTypes[] = {'B','E','J','K','N','R','S','T'};
+          tcTypeSel = 0;
+          for (int i = 0; i < 8; i++) {
+            if (tcTypes[i] == g_tcType) { tcTypeSel = i; break; }
+          }
+          tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
+          screen = "settings_tc_type";
+        }
+        // user pressed DONE
+        if (configSel == 3) {
           tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
           screen = "settings";
           settingsSel = 4;
         }
+      }
+    }
+
+    // TC type selection screen
+    if (screen == "settings_tc_type") {
+      tcTypeScreen();
+      readButtons();
+
+      static const char tcTypes[] = {'B','E','J','K','N','R','S','T'};
+      if (upPressed && tcTypeSel > 0)   tcTypeSel -= 1;
+      if (downPressed && tcTypeSel < 7) tcTypeSel += 1;
+      if (selectPressed) {
+        char confirmed = tcTypes[tcTypeSel];
+        preferences.putInt("tcType", (int)confirmed);
+        xSemaphoreTake(mutex, portMAX_DELAY);
+        g_tcType = confirmed;
+        xSemaphoreGive(mutex);
+        tft.fillRect(0, 20, 320, 240 - 20, TFT_BLACK);
+        screen = "settings_config";
+        configSel = 2;
       }
     }
   }
@@ -549,10 +582,12 @@ void actionScreen(int actionSel) {
   tftPrint(text3, 220, 200);
 }
 
-//  actionScreen: DISPLAYS ACTION MODE
+//  configScreen: DISPLAYS CONFIG MENU
 void configScreen(int configSel) {
+  static const char tcTypes[] = {'B','E','J','K','N','R','S','T'};
   String text1;
-  String text2 = "  DONE  ";
+  String text2;
+  String text3 = "  DONE  ";
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
@@ -575,6 +610,11 @@ void configScreen(int configSel) {
     tft.setTextColor(TFT_RED, TFT_BLACK);  
   }
 
+  // TC type label — show current g_tcType
+  char tcBuf[32];
+  snprintf(tcBuf, sizeof(tcBuf), "  CHANGE TC TYPE: %c  ", g_tcType);
+  text2 = String(tcBuf);
+
   switch (configSel) {
     case 1:
       if (!network.get_captive_mode()) {
@@ -582,14 +622,21 @@ void configScreen(int configSel) {
       } 
       else text1 = "> STOP CAPTIVE PORTAL < ";
       break;
-    case 2:
-      text2 = "> DONE <";
+    case 2: {
+      char sel[32];
+      snprintf(sel, sizeof(sel), "> CHANGE TC TYPE: %c <", g_tcType);
+      text2 = String(sel);
+      break;
+    }
+    case 3:
+      text3 = "> DONE <";
       break;
   }
  
   tftPrintCenterWidth(text1, 100);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tftPrint(text2, 220, 200);
+  tftPrintCenterWidth(text2, 140);
+  tftPrint(text3, 220, 200);
 }
 
 //  RUNNINGSCREEN: UPDATE TFT WITH RUNNING SCREEN
@@ -834,6 +881,44 @@ void tftPrintCenterWidth(String text, int y) {
 void tftPrint(String text, int x, int y) {
   tft.setCursor(x, y);
   tft.print(text);
+}
+
+// tcTypeScreen: displays TC type selection screen
+void tcTypeScreen() {
+  static const char tcTypes[] = {'B','E','J','K','N','R','S','T'};
+  static const char* tcNames[] = {"B","E","J","K","N","R","S","T"};
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+  tftPrint("TC TYPE", 2, 40);
+
+  tft.setTextSize(2);
+  tftPrint("^ UP    v DOWN    SEL=OK", 2, 70);
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  char committed = g_tcType;
+  xSemaphoreGive(mutex);
+
+  char browsed = tcTypes[tcTypeSel];
+  bool changed = (browsed != committed);
+
+  char buf[32];
+  snprintf(buf, sizeof(buf), "   TC: %c   ", browsed);
+
+  tft.setTextSize(3);
+  if (changed) tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+  else         tft.setTextColor(TFT_WHITE,  TFT_BLACK);
+  tftPrintCenterWidth(String(buf), 130);
+
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (changed) {
+    char hint[40];
+    snprintf(hint, sizeof(hint), "current: %c  (press SEL to confirm)", committed);
+    tftPrintCenterWidth(String(hint), 200);
+  } else {
+    tftPrintCenterWidth("", 200);
+  }
 }
 
 //  READBUTTONS: READ IF BUTTONS ARE PRESSED

@@ -1,12 +1,17 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPIFFS.h>
-
-#include <ADS1220_WE.h>
 #include <vector>
 
 #include "userSetup.h"
 #include "common.h"
+
+#ifdef TC_DRIVER_ADS1220
+#include <ADS1220_WE.h>
+#endif
+#ifdef TC_DRIVER_MAX31856
+#include <Adafruit_MAX31856.h>
+#endif
 
 #include "sensor_task.h"
 #include "heat_control.h"
@@ -16,259 +21,401 @@ extern heat_control controller;
 
 static const char* TAG = "sensor_task";
 
-/**
- * @brief Task for reading i2c ADC and converting this to temp
- *
- */
+namespace {
+  float temp;
+  unsigned long tempStart;
+  char lastAppliedTcType = '\0';
 
-namespace{
-  float temp; // thermocouple temperature
-  float ambTemp; // ambient temperature
-  float V_TC; // thermocouple voltage
-  float V_CJ; // cold junction voltage
-  float multiplier; // for adc
-  
-  uint16_t adc_bits; 
+#ifdef TC_DRIVER_ADS1220
+  float ambTemp;
+  float V_TC;
+  float V_CJ;
 
-  bool fault = false;
-
-  unsigned long tempStart; 
-
-  // Structure to hold temperature and milliVolts
   struct TC_TABLE {
     int temperature;
     float milliVolts;
   };
   std::vector<TC_TABLE> table;
+#endif
 }
 
+// ── MAX31856 helpers ─────────────────────────────────────────────────────────
+
+#ifdef TC_DRIVER_MAX31856
+static max31856_thermocoupletype_t tcTypeFromChar(char t) {
+    switch (t) {
+        case 'B': return MAX31856_TCTYPE_B;
+        case 'E': return MAX31856_TCTYPE_E;
+        case 'J': return MAX31856_TCTYPE_J;
+        case 'K': return MAX31856_TCTYPE_K;
+        case 'N': return MAX31856_TCTYPE_N;
+        case 'R': return MAX31856_TCTYPE_R;
+        case 'S': return MAX31856_TCTYPE_S;
+        case 'T': return MAX31856_TCTYPE_T;
+        default:  return MAX31856_TCTYPE_K;
+    }
+}
+#endif
+
+// ── Forward declarations ──────────────────────────────────────────────────────
+
+#ifdef TC_DRIVER_MAX31856
+void setupThermocouple(Adafruit_MAX31856 &thermocouple);
+void readTemps(Adafruit_MAX31856 &thermocouple);
+void handleTcType(Adafruit_MAX31856 &thermocouple);
+#endif
+
+#ifdef TC_DRIVER_ADS1220
+void setupADS1220(ADS1220_WE &ads);
+void readTemps(ADS1220_WE &ads);
+void handleTcType(ADS1220_WE &ads);
 void check_faults();
-void setupThermocouple(ADS1220_WE& ads);
-void readTemps(ADS1220_WE& ads);
-void readSimulatedTemp();
-void readCSV(const char* filePath,std::vector<TC_TABLE>& table );  
+bool readCSV(const char* filePath, std::vector<TC_TABLE>& table);
 float findClosestTemperature(float voltage, const std::vector<TC_TABLE>& table);
 float findClosestVoltage(int temperature, const std::vector<TC_TABLE>& table);
+#endif
+
+void readSimulatedTemp();
+
+// ── Sensor task ───────────────────────────────────────────────────────────────
 
 void sensor_task(void *pvParameter) {
-  ADS1220_WE ads = ADS1220_WE(thermocoupleCS, thermocoupleDRDY);
-  if (!SIMULATION) setupThermocouple(ads);
+  bool startupSim = SIMULATION;
 
-  // loop forever
-  for (;;) { 
-    
-    static int simTempCycle =  static_cast<int>(ceil(tempCycle / alpha));
-    
-    // Simulate PID input
-    if (SIMULATION && millis() - tempStart >= simTempCycle) {
+  #if defined(TC_DRIVER_MAX31856)
+    static Adafruit_MAX31856 thermocouple(TC_CS_PIN);
+    if (!startupSim) setupThermocouple(thermocouple);
+  #elif defined(TC_DRIVER_ADS1220)
+    static ADS1220_WE ads(TC_CS_PIN, TC_DRDY_PIN);
+    if (!startupSim) setupADS1220(ads);
+  #endif
+
+  for (;;) {
+    static int simTempCycle = static_cast<int>(ceil(tempCycle / alpha));
+
+    if (SIMULATION && millis() - tempStart >= (unsigned long)simTempCycle) {
       readSimulatedTemp();
       tempStart = millis();
     }
-    // or Read Thermocouple
-    else if (millis() - tempStart >= tempCycle) {
-      readTemps(ads);
-      tempStart = millis();  
+
+    if (!SIMULATION) {
+      #if defined(TC_DRIVER_MAX31856)
+      handleTcType(thermocouple);
+      #elif defined(TC_DRIVER_ADS1220)
+      handleTcType(ads);
+      #endif
+
+      xSemaphoreTake(mutex, portMAX_DELAY);
+      bool tcReady = g_tcInitialized;
+      xSemaphoreGive(mutex);
+
+      if (tcReady && millis() - tempStart >= (unsigned long)tempCycle) {
+        #if defined(TC_DRIVER_MAX31856)
+          xSemaphoreTake(g_spiMutex, portMAX_DELAY);
+          readTemps(thermocouple);
+          xSemaphoreGive(g_spiMutex);
+        #elif defined(TC_DRIVER_ADS1220)
+          xSemaphoreTake(g_spiMutex, portMAX_DELAY);
+          readTemps(ads);
+          xSemaphoreGive(g_spiMutex);
+        #endif
+        tempStart = millis();
+      }
+    }
+  }
+}
+
+// ── Simulated temperature ────────────────────────────────────────────────────
+
+void readSimulatedTemp() {
+  static double tau = 1200.0;
+  static double Km = 1600;
+  static double T_0 = 30;
+  static double dt = tempCycle / 1000.0;
+  static bool firstRead = true;
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  double pidOutput = g_pidOutput;
+  xSemaphoreGive(mutex);
+
+  if (firstRead) {
+    temp = T_0;
+    firstRead = false;
+  }
+
+  double dydt1 = (Km * pidOutput - (temp - T_0)) / tau;
+  double y_pred = temp + dydt1 * dt;
+  double dydt2 = (Km * pidOutput - (y_pred - T_0)) / tau;
+  temp += 0.5 * (dydt1 + dydt2) * dt;
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  g_pidInput = temp;
+  xSemaphoreGive(mutex);
+}
+
+// ── MAX31856 driver ───────────────────────────────────────────────────────────
+
+#ifdef TC_DRIVER_MAX31856
+void setupThermocouple(Adafruit_MAX31856 &thermocouple) {
+  bool ok = false;
+  while (!ok) {
+    xSemaphoreTake(g_spiMutex, portMAX_DELAY);
+    ok = thermocouple.begin();
+    xSemaphoreGive(g_spiMutex);
+    if (!ok) {
+      xSemaphoreTake(mutex, portMAX_DELAY);
+      snprintf(g_initErr, sizeof(g_initErr), "MAX31856 not found");
+      xSemaphoreGive(mutex);
+      delay(200);
     }
   }
 
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  char tcType = g_tcType;
+  g_initErr[0] = '\0';
+  xSemaphoreGive(mutex);
+
+  xSemaphoreTake(g_spiMutex, portMAX_DELAY);
+  thermocouple.setThermocoupleType(tcTypeFromChar(tcType));
+  thermocouple.setConversionMode(MAX31856_CONTINUOUS);
+  xSemaphoreGive(g_spiMutex);
+
+  lastAppliedTcType = tcType;
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  g_tcInitialized = true;
+  xSemaphoreGive(mutex);
+}
+
+void handleTcType(Adafruit_MAX31856 &thermocouple) {
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  char currentTcType = g_tcType;
+  xSemaphoreGive(mutex);
+
+  if (currentTcType == lastAppliedTcType) return;
+
+  // Validate that the requested type is one of the eight supported chars
+  const char validTypes[] = {'B', 'E', 'J', 'K', 'N', 'R', 'S', 'T'};
+  bool valid = false;
+  for (char c : validTypes) if (c == currentTcType) { valid = true; break; }
+
+  if (!valid) {
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    snprintf(g_initErr, sizeof(g_initErr), "Invalid TC type: %c", currentTcType);
+    g_tcInitialized = false;
+    g_tcFault = true;
+    xSemaphoreGive(mutex);
+    lastAppliedTcType = currentTcType;
+    return;
+  }
+
+  xSemaphoreTake(g_spiMutex, portMAX_DELAY);
+  thermocouple.setThermocoupleType(tcTypeFromChar(currentTcType));
+  xSemaphoreGive(g_spiMutex);
+
+  lastAppliedTcType = currentTcType;
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  g_tcInitialized = true;
+  g_tcFault = false;
+  g_initErr[0] = '\0';
+  xSemaphoreGive(mutex);
+}
+
+void readTemps(Adafruit_MAX31856 &thermocouple) {
+  float raw = thermocouple.readThermocoupleTemperature();
+  uint8_t faultCode = thermocouple.readFault();
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  g_tcFault = (faultCode != 0);
+  g_tcFaultCode = faultCode;
+  if (raw < 5000.0f && raw > 0.0f) {
+    float processed = raw;
+    if (tempScale == 'F') processed = 9.0f / 5.0f * processed + 32.0f;
+    processed += (float)tempOffset;
+    g_pidInput = processed;
+  }
+  xSemaphoreGive(mutex);
+}
+#endif
+
+// ── ADS1220 driver ────────────────────────────────────────────────────────────
+
+#ifdef TC_DRIVER_ADS1220
+void setupADS1220(ADS1220_WE &ads) {
+  bool ok = false;
+  while (!ok) {
+    xSemaphoreTake(g_spiMutex, portMAX_DELAY);
+    ok = ads.init();
+    if (ok) {
+      ads.setCompareChannels(ADS1220_MUX_0_1);
+      ads.setGain(ADS1220_GAIN_32);
+    }
+    xSemaphoreGive(g_spiMutex);
+    if (!ok) {
+      xSemaphoreTake(mutex, portMAX_DELAY);
+      snprintf(g_initErr, sizeof(g_initErr), "ADS1220 not found");
+      xSemaphoreGive(mutex);
+      delay(200);
+    }
+  }
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  char tcType = g_tcType;
+  xSemaphoreGive(mutex);
+
+  // SPIFFS is already mounted by main.cpp before tasks start; begin() is idempotent
+  if (!SPIFFS.begin()) {
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    snprintf(g_initErr, sizeof(g_initErr), "SPIFFS mount failed");
+    g_tcInitialized = false;
+    g_tcFault = true;
+    xSemaphoreGive(mutex);
+    return;
+  }
+
+  if (tcType == 'R') readCSV("/thermocouple_table_r.csv", table);
+  else if (tcType == 'K') readCSV("/thermocouple_table_k.csv", table);
+  else if (tcType == 'S') readCSV("/thermocouple_table_s.csv", table);
+
+  lastAppliedTcType = tcType;
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  g_tcInitialized = !table.empty();
+  g_tcFault = table.empty();
+  if (!table.empty()) {
+    g_initErr[0] = '\0';
+  } else if (g_initErr[0] == '\0') {
+    snprintf(g_initErr, sizeof(g_initErr), "TC type %c: no ADS1220 CSV table", tcType);
+  }
+  xSemaphoreGive(mutex);
+}
+
+void handleTcType(ADS1220_WE &ads) {
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  char currentTcType = g_tcType;
+  xSemaphoreGive(mutex);
+
+  if (currentTcType == lastAppliedTcType) return;
+
+  table.clear();
+
+  // SPIFFS is already mounted; begin() is idempotent
+  if (!SPIFFS.begin()) {
+    // Leave lastAppliedTcType unchanged so the same type is retried when SPIFFS recovers
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    snprintf(g_initErr, sizeof(g_initErr), "SPIFFS mount failed");
+    g_tcInitialized = false;
+    g_tcFault = true;
+    xSemaphoreGive(mutex);
+    return;
+  }
+
+  if (currentTcType == 'R') readCSV("/thermocouple_table_r.csv", table);
+  else if (currentTcType == 'K') readCSV("/thermocouple_table_k.csv", table);
+  else if (currentTcType == 'S') readCSV("/thermocouple_table_s.csv", table);
+  // Any other type → no CSV branch → table stays empty → surfaced as error below
+
+  lastAppliedTcType = currentTcType;
+
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  g_tcInitialized = !table.empty();
+  g_tcFault = table.empty();
+  if (!table.empty()) {
+    g_initErr[0] = '\0';
+  } else if (g_initErr[0] == '\0') {
+    // readCSV sets g_initErr on missing file; if it didn't (unsupported type), set a generic message
+    snprintf(g_initErr, sizeof(g_initErr), "TC type %c: no ADS1220 CSV table", currentTcType);
+  }
+  xSemaphoreGive(mutex);
 }
 
 void readTemps(ADS1220_WE& ads) {
+  if (table.empty()) return;
 
   check_faults();
 
   ads.enableTemperatureSensor(true);
   ambTemp = ads.getTemperature();
-  ads.enableTemperatureSensor(false); 
-  // Serial.printf("\n Cold junction temp: %f degC\n", ambTemp);
+  ads.enableTemperatureSensor(false);
 
-  V_TC = ads.getVoltage_mV(); // get result in millivolts
-  // Serial.printf("Differential voltage: %f mV\n", V_TC);
-  
-  // Magic algorithm
-  // unsigned long t = micros();
-  V_CJ = findClosestVoltage(ambTemp, table); // find voltage compensation
-  // Serial.printf("finding V_CJ took: %d us\n", micros()-t);
-  // Serial.printf("voltage in cold junction: %f mV\n", V_CJ);
-  float realVoltage = V_TC + V_CJ; // compensate the TC 
-  // Serial.printf("corrected voltage: %f\n", realVoltage);
-  // t = micros();
-  temp = findClosestTemperature(realVoltage, table); // extract temperature from table
-  // Serial.printf("finding temp took: %d us\n", micros()-t);
+  V_TC = ads.getVoltage_mV();
+  V_CJ = findClosestVoltage(ambTemp, table);
+  float realVoltage = V_TC + V_CJ;
+  temp = findClosestTemperature(realVoltage, table);
 
-  // output
-  // Serial.printf("Thermocouple temperature = %f degC\n", temp);
-
-  // filter nonsense
   if (temp < 5000 && temp > 0) {
-    if (tempScale == 'F') {
-      temp = 9 / 5 * temp + 32;
-    }
-    
-    temp = temp + tempOffset;  // add any offset
-    
-    /* Use Mutex to save temperature to global variable */
-    xSemaphoreTake(mutex, portMAX_DELAY);  //Take semaphore
+    if (tempScale == 'F') temp = 9.0f / 5.0f * temp + 32.0f;
+    temp += (float)tempOffset;
+
+    xSemaphoreTake(mutex, portMAX_DELAY);
     g_pidInput = temp;
-    xSemaphoreGive(mutex);  // Release the semaphore
+    xSemaphoreGive(mutex);
   }
-}
-
-void readSimulatedTemp() {  
-  // tau * dy/dt = -[y(t)-T_0] + Km * u(t) 
-  static double tau = 1200.0;  // time constant (63% of gain will be reached in tau) [seconds]
-  static double Km = 1600;     // gain = delta Y / delta U [degC/power]
-  static double T_0 = 30;     // starting temp  
-  
-  static double dt = tempCycle / 1000.0; // sampling period [seconds]
-  static bool firstRead = true;
-
-  /* Use Mutex to save temperature to global variable */
-  xSemaphoreTake(mutex, portMAX_DELAY);  //Take semaphore
-  double pidOutput = g_pidOutput;
-  xSemaphoreGive(mutex);  // Release the semaphore
-
-  if(firstRead) {
-    temp = T_0;
-    firstRead = false;
-  }
-
-  // Current derivative based on current input and output
-  double dydt1 = (Km * pidOutput - (temp-T_0)) / (tau);
-  // Predict the output at the next time step using the initial derivative
-  double y_pred = temp + dydt1 * dt;
-  // Derivative based on the predicted output
-  double dydt2 = (Km * pidOutput - (y_pred-T_0)) / (tau);
-  // Correcting the prediction using the average of the initial and predicted derivatives
-  temp += 0.5 * (dydt1 + dydt2) * dt;
-
-  // if (abs(temp - 80) < 1.0) {
-  //   temp = 250;
-  // }
-
-  /* Use Mutex to get pidOutput */
-  xSemaphoreTake(mutex, portMAX_DELAY);  //Take semaphore
-  g_pidInput = temp;
-  xSemaphoreGive(mutex);  // Release the semaphore
 }
 
 void check_faults() {
-  if (V_TC > table[table.size() - 1].milliVolts) fault = true;
-  else fault = false;
+  if (table.empty()) return;
 
-  xSemaphoreTake(mutex, portMAX_DELAY);  //Take semaphore
-  g_fault = fault;
-  xSemaphoreGive(mutex);  // Release the semaphore
+  bool fault = (V_TC > table[table.size() - 1].milliVolts);
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  g_tcFault = fault;
+  xSemaphoreGive(mutex);
 }
 
-void setupThermocouple(ADS1220_WE& ads) {  
-  // begin ADS
-  while (!ads.init()) {
-    disp_error_msg("TC ERROR","Could not initialize thermocouple.", "Check connections");
-    if (digitalRead(rstPin) == LOW) esp_restart();
-    delay(200);
-  }
-
-  ads.setCompareChannels(ADS1220_MUX_0_1);
-  ads.setGain(ADS1220_GAIN_32);
-
-  // setup thermocouple type for LUT
-  if (TCTYPE == "R") {
-    readCSV("/thermocouple_table_r.csv", table);
-  }
-  if (TCTYPE == "K") {
-    readCSV("/thermocouple_table_k.csv", table);
-  }
-  if (TCTYPE == "S") {
-    readCSV("/thermocouple_table_s.csv", table);
-  }
-}
-
-// Function to read CSV and save a vector struct
-void readCSV(const char* filePath, std::vector<TC_TABLE>&TABLE ) {
-  
+// Returns false and sets g_initErr if the file cannot be opened
+bool readCSV(const char* filePath, std::vector<TC_TABLE>& table) {
   fs::File file = SPIFFS.open(filePath, "r");
-
-  while (!file) {
-    disp_error_msg("TC Error", "Can't setup file system.", "Make sure files are uploaded.");
-    if (digitalRead(rstPin) == LOW) esp_restart();
-    delay(200);
+  if (!file) {
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    snprintf(g_initErr, sizeof(g_initErr), "Missing table: %s", filePath);
+    xSemaphoreGive(mutex);
+    return false;
   }
 
-  // Read and process each line of the file
   TC_TABLE entry;
   while (file.available()) {
     String line = file.readStringUntil('\n');
-    // eg line: '0.113,20.0'
     int commaPos = line.indexOf(',');
-    float mv = line.substring(0,commaPos).toFloat(); // mv is first number
-    int temp = line.substring(commaPos + 1).toInt(); // temp is the second number
-    
-    entry.temperature = temp;
-    entry.milliVolts = mv;
-    TABLE.push_back(entry);
+    entry.milliVolts  = line.substring(0, commaPos).toFloat();
+    entry.temperature = line.substring(commaPos + 1).toInt();
+    table.push_back(entry);
   }
-    // Close the file
   file.close();
-  // Serial.printf("Succesfully read %s file\n", filePath);
+  return true;
 }
 
-// Function to find the closest temperature for a given voltage
 float findClosestTemperature(float voltage, const std::vector<TC_TABLE>& table) {
-  float closestTemperature;
-  size_t low = 0;
-  size_t high = table.size() - 1;
+  if (voltage <= table.front().milliVolts) return (float)table.front().temperature;
+  if (voltage >= table.back().milliVolts)  return (float)table.back().temperature;
 
+  size_t low = 0, high = table.size() - 1;
   while (low <= high) {
     size_t mid = (low + high) / 2;
-
-    if (table[mid].milliVolts < voltage) {
-      low = mid + 1;
-    } else if (table[mid].milliVolts > voltage) {
-      high = mid - 1;
-    } else {
-      // Exact match, no need for interpolation
-      return table[mid].temperature;
-    }
+    if      (table[mid].milliVolts < voltage) low  = mid + 1;
+    else if (table[mid].milliVolts > voltage) high = mid - 1;
+    else return (float)table[mid].temperature;
   }
 
-  // At this point, 'low' is the index of the smallest entry greater than the temperature
-  // Perform linear interpolation
-  float slope = (table[low].temperature - table[low - 1].temperature) /
-                    (table[low].milliVolts - table[low - 1].milliVolts); // units of (degC/mV)
-
-  closestTemperature = table[low - 1].temperature +
-                   slope * (voltage - table[low - 1].milliVolts);
-
-  return closestTemperature;
+  float slope = (float)(table[low].temperature - table[low - 1].temperature) /
+                        (table[low].milliVolts  - table[low - 1].milliVolts);
+  return table[low - 1].temperature + slope * (voltage - table[low - 1].milliVolts);
 }
 
-// Function to find the closest voltage for a given temperature
 float findClosestVoltage(int temperature, const std::vector<TC_TABLE>& table) {
-  float closestVoltage;
-  size_t low = 0;
-  size_t high = table.size() - 1;
+  if (temperature <= table.front().temperature) return table.front().milliVolts;
+  if (temperature >= table.back().temperature)  return table.back().milliVolts;
 
+  size_t low = 0, high = table.size() - 1;
   while (low <= high) {
     size_t mid = (low + high) / 2;
-
-    if (table[mid].temperature < temperature) {
-      low = mid + 1;
-    } else if (table[mid].temperature > temperature) {
-      high = mid - 1;
-    } else {
-      // Exact match, no need for interpolation
-      return table[mid].milliVolts;
-    }
+    if      (table[mid].temperature < temperature) low  = mid + 1;
+    else if (table[mid].temperature > temperature) high = mid - 1;
+    else return table[mid].milliVolts;
   }
 
-  // At this point, 'low' is the index of the smallest entry greater than the temperature
-  // Perform linear interpolation
   float slope = (table[low].milliVolts - table[low - 1].milliVolts) /
-                (table[low].temperature - table[low - 1].temperature); // units of (mV/degC)
-
-  closestVoltage = table[low - 1].milliVolts +
-                   slope * (temperature - table[low - 1].temperature);
-
-  return closestVoltage;
+                (float)(table[low].temperature - table[low - 1].temperature);
+  return table[low - 1].milliVolts + slope * (temperature - table[low - 1].temperature);
 }
+#endif
