@@ -600,6 +600,55 @@ bool Network::get_captive_mode() const {
   return captive_mode;
 }
 
+namespace {
+constexpr size_t PROGRAM_PATH_MAX_LEN = 31;
+constexpr size_t PROGRAM_FILE_FIXED_LEN =
+    (sizeof("/prog_") - 1) + (sizeof(".json") - 1);
+constexpr size_t PROGRAM_FILE_SLUG_MAX_LEN =
+    PROGRAM_PATH_MAX_LEN - PROGRAM_FILE_FIXED_LEN;
+
+String trimProgramFileSlug(String slug, size_t maxLen) {
+  if (slug.length() > maxLen) slug = slug.substring(0, maxLen);
+  while (slug.length() > 0 && slug.charAt(slug.length() - 1) == '-')
+    slug.remove(slug.length() - 1);
+  if (slug.isEmpty()) slug = "program";
+  if (slug.length() > maxLen) slug = slug.substring(0, maxLen);
+  return slug;
+}
+
+String programFilenameForSlug(const String& slug) {
+  return "/prog_" + slug + ".json";
+}
+
+String programSlugFromFilename(const String& filename) {
+  if (!filename.startsWith("/prog_") || !filename.endsWith(".json")) return "";
+  return filename.substring(6, filename.length() - 5);
+}
+
+uint32_t programTempHash(const String& slug) {
+  uint32_t hash = 2166136261u;
+  for (unsigned int i = 0; i < slug.length(); i++) {
+    hash ^= (uint8_t)slug.charAt(i);
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+String tempProgramPath(const char* prefix, const String& slug) {
+  char hashHex[9];
+  snprintf(hashHex, sizeof(hashHex), "%08lx", (unsigned long)programTempHash(slug));
+  return String(prefix) + hashHex + ".json";
+}
+
+String tempProgramFilename(const String& slug) {
+  return tempProgramPath("/tmpw_", slug);
+}
+
+String backupProgramFilename(const String& slug) {
+  return tempProgramPath("/tmpb_", slug);
+}
+}  // namespace
+
 // makeSlug: converts a program name + date into a filesystem-safe identifier
 String Network::makeSlug(const String& name, const String& date) {
   String src = name;
@@ -632,12 +681,31 @@ String Network::makeSlug(const String& name, const String& date) {
 
 // uniqueSlug: appends a numeric suffix if the generated filename already exists
 String Network::uniqueSlug(const String& base) {
-  if (!fileSystem.exists("/prog_" + base + ".json")) return base;
+  String normalizedBase = trimProgramFileSlug(base, PROGRAM_FILE_SLUG_MAX_LEN);
+  String candidateFile = programFilenameForSlug(normalizedBase);
+  if (!fileSystem.exists(candidateFile)) return normalizedBase;
+
   for (int i = 2; i <= 99; i++) {
-    String candidate = base + "-" + String(i);
-    if (!fileSystem.exists("/prog_" + candidate + ".json")) return candidate;
+    String suffix = "-" + String(i);
+    String candidate =
+        trimProgramFileSlug(normalizedBase,
+                            PROGRAM_FILE_SLUG_MAX_LEN - suffix.length()) +
+        suffix;
+    candidateFile = programFilenameForSlug(candidate);
+    if (!fileSystem.exists(candidateFile)) return candidate;
   }
-  return base + "-" + String(millis() % 10000);
+
+  for (uint32_t salt = 0; salt < 10000; salt++) {
+    String suffix = "-" + String((millis() + salt) % 10000);
+    String candidate =
+        trimProgramFileSlug(normalizedBase,
+                            PROGRAM_FILE_SLUG_MAX_LEN - suffix.length()) +
+        suffix;
+    candidateFile = programFilenameForSlug(candidate);
+    if (!fileSystem.exists(candidateFile)) return candidate;
+  }
+
+  return normalizedBase;
 }
 
 // refreshCatalog: scans filesystem for program files and rebuilds in-memory catalog
@@ -670,11 +738,12 @@ void Network::refreshCatalog() {
   }
 
   // Read metadata from each matched file — only parse name/date/duration, skip segments
-  StaticJsonDocument<64> filter;
+  StaticJsonDocument<128> filter;
   filter["name"] = true;
   filter["created_date"] = true;
   filter["createdDate"] = true;
   filter["duration"] = true;
+  filter["id"] = true;
 
   for (int i = 0; i < fc && catalogSize_ < PROGRAM_CATALOG_MAX; i++) {
     File pf = fileSystem.open(fnames[i], FILE_READ);
@@ -696,9 +765,12 @@ void Network::refreshCatalog() {
     e.duration   = pdoc["duration"] | String("");
 
     if (newFmt[i]) {
-      // Strip "prog_" prefix and ".json" suffix to recover slug
-      String base = fnames[i].substring(1); // remove leading /
-      e.id = base.substring(5, base.length() - 5);
+      const char* storedId = pdoc["id"];
+      if (storedId && strlen(storedId) > 0) {
+        e.id = storedId;
+      } else {
+        e.id = programSlugFromFilename(fnames[i]);
+      }
     } else {
       e.id = makeSlug(e.name, e.createdDate);
       if (e.id == "program") e.id = "prog-" + String(catalogSize_);
@@ -756,23 +828,63 @@ String Network::handleSaveProgramBody(const String& body) {
   // Determine existing file to replace (rename or update in-place)
   String existingId  = doc["existing_id"] | String("");
   String existingFile;
+  String existingName;
+  String existingCreatedDate;
   if (!catalogLoaded_) refreshCatalog();
   for (int i = 0; i < catalogSize_; i++) {
-    if (catalog_[i].id == existingId) { existingFile = catalog_[i].filename; break; }
+    if (catalog_[i].id == existingId) {
+      existingFile = catalog_[i].filename;
+      existingName = catalog_[i].name;
+      existingCreatedDate = catalog_[i].createdDate;
+      break;
+    }
   }
 
   String baseSlug = makeSlug(String(name), String(createdDate));
-  String finalSlug, finalFilename;
-  if (!existingId.isEmpty() && existingId == baseSlug) {
-    finalSlug     = existingId;
-    finalFilename = "/prog_" + finalSlug + ".json";
+  String existingBaseSlug =
+      existingFile.isEmpty() ? String("") : makeSlug(existingName, existingCreatedDate);
+  String finalId = baseSlug;
+  if (!existingFile.isEmpty() && baseSlug == existingBaseSlug) {
+    finalId = existingId;
   } else {
-    finalSlug     = uniqueSlug(baseSlug);
-    finalFilename = "/prog_" + finalSlug + ".json";
+    auto idExists = [&](const String& candidate) {
+      for (int i = 0; i < catalogSize_; i++) {
+        if (catalog_[i].id == candidate && catalog_[i].id != existingId) return true;
+      }
+      return false;
+    };
+
+    if (idExists(finalId)) {
+      bool assigned = false;
+      for (int i = 2; i <= 99 && !assigned; i++) {
+        String candidate = baseSlug + "-" + String(i);
+        if (!idExists(candidate)) {
+          finalId = candidate;
+          assigned = true;
+        }
+      }
+      for (uint32_t salt = 0; salt < 10000 && !assigned; salt++) {
+        String candidate = baseSlug + "-" + String((millis() + salt) % 10000);
+        if (!idExists(candidate)) {
+          finalId = candidate;
+          assigned = true;
+        }
+      }
+    }
   }
+
+  String finalSlug;
+  if (!existingFile.isEmpty() && baseSlug == existingBaseSlug) {
+    finalSlug = programSlugFromFilename(existingFile);
+    if (finalSlug.isEmpty()) finalSlug = uniqueSlug(baseSlug);
+  } else {
+    finalSlug = uniqueSlug(baseSlug);
+  }
+  String finalFilename = programFilenameForSlug(finalSlug);
 
   // Build canonical document
   DynamicJsonDocument out(4096);
+  out["id"]           = finalId;
   out["name"]         = name;
   out["created_date"] = createdDate;
   out["duration"]     = String(totalMins) + " min";
@@ -790,14 +902,56 @@ String Network::handleSaveProgramBody(const String& body) {
     os["holding_time"]       = h;
   }
 
-  // Write new file before touching the old one — prevents data loss on write failure
-  File wf = fileSystem.open(finalFilename, FILE_WRITE);
+  // Write replacement bytes to a different path first; FILE_WRITE truncates immediately.
+  bool replacingInPlace = !existingFile.isEmpty() && existingFile == finalFilename;
+  String writeFilename = replacingInPlace ? tempProgramFilename(finalSlug) : finalFilename;
+  if (replacingInPlace) fileSystem.remove(writeFilename);
+
+  File wf = fileSystem.open(writeFilename, FILE_WRITE);
   if (!wf) return "{\"error\":\"Failed to open file for writing\"}";
   size_t written = serializeJson(out, wf);
   wf.close();
   if (written == 0) {
-    fileSystem.remove(finalFilename); // clean up zero-byte artifact
+    fileSystem.remove(writeFilename); // clean up zero-byte artifact
     return "{\"error\":\"Failed to write JSON\"}";
+  }
+
+  if (replacingInPlace) {
+    String backupFilename = backupProgramFilename(finalSlug);
+    fileSystem.remove(backupFilename);
+
+    if (!fileSystem.rename(existingFile, backupFilename)) {
+      fileSystem.remove(writeFilename);
+      return "{\"error\":\"Failed to stage existing file for replacement\"}";
+    }
+
+    if (!fileSystem.rename(writeFilename, finalFilename)) {
+      fileSystem.remove(finalFilename);
+      bool restored = fileSystem.rename(backupFilename, existingFile);
+      if (!restored) {
+        File src = fileSystem.open(backupFilename, FILE_READ);
+        File dst = fileSystem.open(existingFile, FILE_WRITE);
+        bool copyOk = src && dst;
+        uint8_t buf[256];
+        while (copyOk && src.available()) {
+          size_t n = src.read(buf, sizeof(buf));
+          if (n == 0) break;
+          if (dst.write(buf, n) != n) copyOk = false;
+        }
+        if (src) src.close();
+        if (dst) dst.close();
+        if (!copyOk) {
+          fileSystem.remove(existingFile);
+          fileSystem.remove(writeFilename);
+          return "{\"error\":\"Failed to restore original file after replacement failure\"}";
+        }
+        fileSystem.remove(backupFilename);
+      }
+      fileSystem.remove(writeFilename);
+      return "{\"error\":\"Failed to finalize file replacement\"}";
+    }
+
+    fileSystem.remove(backupFilename);
   }
 
   // Only delete the old file after the new one is confirmed written
@@ -809,5 +963,5 @@ String Network::handleSaveProgramBody(const String& body) {
   refreshCatalog();
 
   Serial.printf("Saved program '%s' → %s\n", name, finalFilename.c_str());
-  return "{\"id\":\"" + finalSlug + "\"}";
+  return "{\"id\":\"" + finalId + "\"}";
 }
