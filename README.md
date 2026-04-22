@@ -173,12 +173,10 @@ The device can check for and install firmware updates directly from GitHub Relea
 Contributions are welcome! Feel free to open an issue or submit a pull request.
 
 ## To Do
-1. Add excel pinout file
-2. Ability to view and edit programs from webserver
+1. Web server doesn't start until restart after wifi credentials are set. Trigger restart or what to do?
+2. MAX31856 capability + configure thermocouple from tft screen
 3. Autotune PID ala https://github.com/hirschmann/pid-autotune/blob/master/autotune.py
-4. Configure thermocouple from tft screen and/or web server
-5. MAX31856 capability (include in platformio.ini file, sensor_task.cpp method based on userSetup.h configuration)
-6. advertising of project via forums/rdit/utube
+4. advertising of project via forums/rdit/utube
 
 ## License
 
