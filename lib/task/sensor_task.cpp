@@ -160,7 +160,8 @@ void setupThermocouple(Adafruit_MAX31856 &thermocouple) {
     xSemaphoreGive(g_spiMutex);
     if (!ok) {
       xSemaphoreTake(mutex, portMAX_DELAY);
-      snprintf(g_initErr, sizeof(g_initErr), "MAX31856 not found");
+      g_errMsg = "MAX31856 not found";
+      g_tcFault = true;
       xSemaphoreGive(mutex);
       delay(200);
     }
@@ -168,7 +169,7 @@ void setupThermocouple(Adafruit_MAX31856 &thermocouple) {
 
   xSemaphoreTake(mutex, portMAX_DELAY);
   char tcType = g_tcType;
-  g_initErr[0] = '\0'; // hardware found — clear any prior not-found error
+  g_errMsg = ""; // hardware found — clear any prior not-found error
   xSemaphoreGive(mutex);
 
   xSemaphoreTake(g_spiMutex, portMAX_DELAY);
@@ -197,7 +198,7 @@ void handleTcType(Adafruit_MAX31856 &thermocouple) {
 
   if (!valid) {
     xSemaphoreTake(mutex, portMAX_DELAY);
-    snprintf(g_initErr, sizeof(g_initErr), "Invalid TC type: %c", currentTcType);
+    g_errMsg = String("Invalid TC type: ") + currentTcType;
     g_tcInitialized = false;
     g_tcFault = true;
     xSemaphoreGive(mutex);
@@ -214,7 +215,7 @@ void handleTcType(Adafruit_MAX31856 &thermocouple) {
   xSemaphoreTake(mutex, portMAX_DELAY);
   g_tcInitialized = true;
   g_tcFault = false;
-  g_initErr[0] = '\0';
+  g_errMsg = "";
   xSemaphoreGive(mutex);
 }
 
@@ -222,25 +223,25 @@ void readTemps(Adafruit_MAX31856 &thermocouple) {
   float raw = thermocouple.readThermocoupleTemperature();
   uint8_t faultCode = thermocouple.readFault();
 
-  char faultMsg[64] = "";
+  String faultMsg = "";
   if (faultCode != 0) {
-    if (faultCode & MAX31856_FAULT_CJRANGE) strlcat(faultMsg, "CJRANGE ", sizeof(faultMsg));
-    if (faultCode & MAX31856_FAULT_TCRANGE) strlcat(faultMsg, "TCRANGE ", sizeof(faultMsg));
-    if (faultCode & MAX31856_FAULT_CJHIGH)  strlcat(faultMsg, "CJ HIGH ", sizeof(faultMsg));
-    if (faultCode & MAX31856_FAULT_CJLOW)   strlcat(faultMsg, "CJ LOW ", sizeof(faultMsg));
-    if (faultCode & MAX31856_FAULT_TCHIGH)  strlcat(faultMsg, "TC HIGH ", sizeof(faultMsg));
-    if (faultCode & MAX31856_FAULT_TCLOW)   strlcat(faultMsg, "TC LOW ", sizeof(faultMsg));
-    if (faultCode & MAX31856_FAULT_OVUV)    strlcat(faultMsg, "OV/UV ", sizeof(faultMsg));
-    if (faultCode & MAX31856_FAULT_OPEN)    strlcat(faultMsg, "TC OPEN", sizeof(faultMsg));
+    if (faultCode & MAX31856_FAULT_CJRANGE) faultMsg += "CJRANGE ";
+    if (faultCode & MAX31856_FAULT_TCRANGE) faultMsg += "TCRANGE ";
+    if (faultCode & MAX31856_FAULT_CJHIGH)  faultMsg += "CJ HIGH ";
+    if (faultCode & MAX31856_FAULT_CJLOW)   faultMsg += "CJ LOW ";
+    if (faultCode & MAX31856_FAULT_TCHIGH)  faultMsg += "TC HIGH ";
+    if (faultCode & MAX31856_FAULT_TCLOW)   faultMsg += "TC LOW ";
+    if (faultCode & MAX31856_FAULT_OVUV)    faultMsg += "OV/UV ";
+    if (faultCode & MAX31856_FAULT_OPEN)    faultMsg += "TC OPEN";
   }
 
   xSemaphoreTake(mutex, portMAX_DELAY);
   g_tcFault = (faultCode != 0);
   g_tcFaultCode = faultCode;
   if (faultCode != 0) {
-    snprintf(g_initErr, sizeof(g_initErr), "%s", faultMsg);
+    g_errMsg = faultMsg;
   } else {
-    g_initErr[0] = '\0';
+    g_errMsg = "";
     if (raw < 5000.0f && raw > 0.0f) {
       float processed = raw;
       if (tempScale == 'F') processed = 9.0f / 5.0f * processed + 32.0f;
@@ -267,7 +268,8 @@ void setupThermocouple(ADS1220_WE &ads) {
     xSemaphoreGive(g_spiMutex);
     if (!ok) {
       xSemaphoreTake(mutex, portMAX_DELAY);
-      snprintf(g_initErr, sizeof(g_initErr), "ADS1220 not found");
+      g_errMsg = "ADS1220 not found";
+      g_tcFault = true;
       xSemaphoreGive(mutex);
       delay(200);
     }
@@ -276,16 +278,6 @@ void setupThermocouple(ADS1220_WE &ads) {
   xSemaphoreTake(mutex, portMAX_DELAY);
   char tcType = g_tcType;
   xSemaphoreGive(mutex);
-
-  // SPIFFS is already mounted by main.cpp before tasks start; begin() is idempotent
-  if (!SPIFFS.begin()) {
-    xSemaphoreTake(mutex, portMAX_DELAY);
-    snprintf(g_initErr, sizeof(g_initErr), "SPIFFS mount failed");
-    g_tcInitialized = false;
-    g_tcFault = true;
-    xSemaphoreGive(mutex);
-    return;
-  }
 
   if (tcType == 'R') readCSV("/thermocouple_table_r.csv", table);
   else if (tcType == 'K') readCSV("/thermocouple_table_k.csv", table);
@@ -297,9 +289,10 @@ void setupThermocouple(ADS1220_WE &ads) {
   g_tcInitialized = !table.empty();
   g_tcFault = table.empty();
   if (!table.empty()) {
-    g_initErr[0] = '\0';
-  } else if (g_initErr[0] == '\0') {
-    snprintf(g_initErr, sizeof(g_initErr), "TC type %c: no ADS1220 CSV table", tcType);
+    g_errMsg = "";
+  } 
+  else if (g_errMsg.isEmpty()) {
+    g_errMsg = String("TC type ") + (char)tcType + ": no ADS1220 CSV table";
   }
   xSemaphoreGive(mutex);
 }
@@ -313,17 +306,6 @@ void handleTcType(ADS1220_WE &ads) {
 
   table.clear();
 
-  // SPIFFS is already mounted; begin() is idempotent
-  if (!SPIFFS.begin()) {
-    // Leave lastAppliedTcType unchanged so the same type is retried when SPIFFS recovers
-    xSemaphoreTake(mutex, portMAX_DELAY);
-    snprintf(g_initErr, sizeof(g_initErr), "SPIFFS mount failed");
-    g_tcInitialized = false;
-    g_tcFault = true;
-    xSemaphoreGive(mutex);
-    return;
-  }
-
   if (currentTcType == 'R') readCSV("/thermocouple_table_r.csv", table);
   else if (currentTcType == 'K') readCSV("/thermocouple_table_k.csv", table);
   else if (currentTcType == 'S') readCSV("/thermocouple_table_s.csv", table);
@@ -335,10 +317,10 @@ void handleTcType(ADS1220_WE &ads) {
   g_tcInitialized = !table.empty();
   g_tcFault = table.empty();
   if (!table.empty()) {
-    g_initErr[0] = '\0';
-  } else if (g_initErr[0] == '\0') {
-    // readCSV sets g_initErr on missing file; if it didn't (unsupported type), set a generic message
-    snprintf(g_initErr, sizeof(g_initErr), "TC type %c: no ADS1220 CSV table", currentTcType);
+    g_errMsg = "";
+  } else if (g_errMsg.isEmpty()) {
+    // readCSV sets g_errMsg on missing file; if it didn't (unsupported type), set a generic message
+    g_errMsg = String("TC type ") + (char)currentTcType + ": no ADS1220 CSV table";
   }
   xSemaphoreGive(mutex);
 }
@@ -374,19 +356,19 @@ void check_faults() {
   xSemaphoreTake(mutex, portMAX_DELAY);
   g_tcFault = fault;
   if (fault) {
-    snprintf(g_initErr, sizeof(g_initErr), "TC OPEN or over-range");
+    g_errMsg = "TC OPEN or over-range";
   } else {
-    g_initErr[0] = '\0';
+    g_errMsg = "";
   }
   xSemaphoreGive(mutex);
 }
 
-// Returns false and sets g_initErr if the file cannot be opened
+// Returns false and sets g_errMsg if the file cannot be opened
 bool readCSV(const char* filePath, std::vector<TC_TABLE>& table) {
   fs::File file = SPIFFS.open(filePath, "r");
   if (!file) {
     xSemaphoreTake(mutex, portMAX_DELAY);
-    snprintf(g_initErr, sizeof(g_initErr), "Missing table: %s", filePath);
+    g_errMsg = String("Missing table: ") + filePath;
     xSemaphoreGive(mutex);
     return false;
   }

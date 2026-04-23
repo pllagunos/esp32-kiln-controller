@@ -23,7 +23,7 @@ bool g_connecting;
 bool g_published;
 char g_tcType;
 bool g_tcInitialized;
-char g_initErr[64];
+String g_errMsg;
 bool g_tcFault;
 uint8_t g_tcFaultCode;
 

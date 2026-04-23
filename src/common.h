@@ -61,7 +61,7 @@ extern bool g_connecting;              // Is the ESP trying to connect to WiFi
 extern bool g_published;               // Is the ESP publishing to InfluxDB?
 extern char g_tcType;                  // Runtime thermocouple type (single char: B E J K N R S T)
 extern bool g_tcInitialized;           // True when the thermocouple driver is ready to read
-extern char g_initErr[64];             // Human-readable init or runtime fault message
+extern String g_errMsg;                // Human-readable init or runtime fault message
 extern bool g_tcFault;                 // Active thermocouple fault (safety-critical)
 extern uint8_t g_tcFaultCode;          // Raw MAX31856 fault bitmask (0 for ADS1220)
 
