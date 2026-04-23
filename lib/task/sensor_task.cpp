@@ -66,7 +66,7 @@ void handleTcType(Adafruit_MAX31856 &thermocouple);
 #endif
 
 #ifdef TC_DRIVER_ADS1220
-void setupADS1220(ADS1220_WE &ads);
+void setupThermocouple(ADS1220_WE &ads);
 void readTemps(ADS1220_WE &ads);
 void handleTcType(ADS1220_WE &ads);
 void check_faults();
@@ -84,11 +84,11 @@ void sensor_task(void *pvParameter) {
 
   #if defined(TC_DRIVER_MAX31856)
     static Adafruit_MAX31856 thermocouple(TC_CS_PIN);
-    if (!startupSim) setupThermocouple(thermocouple);
   #elif defined(TC_DRIVER_ADS1220)
-    static ADS1220_WE ads(TC_CS_PIN, TC_DRDY_PIN);
-    if (!startupSim) setupADS1220(ads);
+    static ADS1220_WE thermocouple(TC_CS_PIN, TC_DRDY_PIN);
   #endif
+
+  if (!startupSim) setupThermocouple(thermocouple);
 
   for (;;) {
     static int simTempCycle = static_cast<int>(ceil(tempCycle / alpha));
@@ -99,26 +99,16 @@ void sensor_task(void *pvParameter) {
     }
 
     if (!SIMULATION) {
-      #if defined(TC_DRIVER_MAX31856)
       handleTcType(thermocouple);
-      #elif defined(TC_DRIVER_ADS1220)
-      handleTcType(ads);
-      #endif
 
       xSemaphoreTake(mutex, portMAX_DELAY);
       bool tcReady = g_tcInitialized;
       xSemaphoreGive(mutex);
 
       if (tcReady && millis() - tempStart >= (unsigned long)tempCycle) {
-        #if defined(TC_DRIVER_MAX31856)
-          xSemaphoreTake(g_spiMutex, portMAX_DELAY);
-          readTemps(thermocouple);
-          xSemaphoreGive(g_spiMutex);
-        #elif defined(TC_DRIVER_ADS1220)
-          xSemaphoreTake(g_spiMutex, portMAX_DELAY);
-          readTemps(ads);
-          xSemaphoreGive(g_spiMutex);
-        #endif
+        xSemaphoreTake(g_spiMutex, portMAX_DELAY);
+        readTemps(thermocouple);
+        xSemaphoreGive(g_spiMutex);
         tempStart = millis();
       }
     }
@@ -127,6 +117,12 @@ void sensor_task(void *pvParameter) {
 
 // ── Simulated temperature ────────────────────────────────────────────────────
 
+// Uses FOPDT model with Runge Kutta integration, following this ODE:
+// tau * dy/dt = -[y(t)-T_0] + Km * u(t) 
+// Parameters:
+// tau := time constant (63% of gain will be reached in tau) [seconds]
+// gain := steady state gain = Temperature gain per unit of PID output [degrees/unit]
+// T_0 := ambient temperature [degrees]
 void readSimulatedTemp() {
   static double tau = 1200.0;
   static double Km = 1600;
@@ -172,7 +168,7 @@ void setupThermocouple(Adafruit_MAX31856 &thermocouple) {
 
   xSemaphoreTake(mutex, portMAX_DELAY);
   char tcType = g_tcType;
-  g_initErr[0] = '\0';
+  g_initErr[0] = '\0'; // hardware found — clear any prior not-found error
   xSemaphoreGive(mutex);
 
   xSemaphoreTake(g_spiMutex, portMAX_DELAY);
@@ -226,14 +222,31 @@ void readTemps(Adafruit_MAX31856 &thermocouple) {
   float raw = thermocouple.readThermocoupleTemperature();
   uint8_t faultCode = thermocouple.readFault();
 
+  char faultMsg[64] = "";
+  if (faultCode != 0) {
+    if (faultCode & MAX31856_FAULT_CJRANGE) strlcat(faultMsg, "CJRANGE ", sizeof(faultMsg));
+    if (faultCode & MAX31856_FAULT_TCRANGE) strlcat(faultMsg, "TCRANGE ", sizeof(faultMsg));
+    if (faultCode & MAX31856_FAULT_CJHIGH)  strlcat(faultMsg, "CJ HIGH ", sizeof(faultMsg));
+    if (faultCode & MAX31856_FAULT_CJLOW)   strlcat(faultMsg, "CJ LOW ", sizeof(faultMsg));
+    if (faultCode & MAX31856_FAULT_TCHIGH)  strlcat(faultMsg, "TC HIGH ", sizeof(faultMsg));
+    if (faultCode & MAX31856_FAULT_TCLOW)   strlcat(faultMsg, "TC LOW ", sizeof(faultMsg));
+    if (faultCode & MAX31856_FAULT_OVUV)    strlcat(faultMsg, "OV/UV ", sizeof(faultMsg));
+    if (faultCode & MAX31856_FAULT_OPEN)    strlcat(faultMsg, "TC OPEN", sizeof(faultMsg));
+  }
+
   xSemaphoreTake(mutex, portMAX_DELAY);
   g_tcFault = (faultCode != 0);
   g_tcFaultCode = faultCode;
-  if (raw < 5000.0f && raw > 0.0f) {
-    float processed = raw;
-    if (tempScale == 'F') processed = 9.0f / 5.0f * processed + 32.0f;
-    processed += (float)tempOffset;
-    g_pidInput = processed;
+  if (faultCode != 0) {
+    snprintf(g_initErr, sizeof(g_initErr), "%s", faultMsg);
+  } else {
+    g_initErr[0] = '\0';
+    if (raw < 5000.0f && raw > 0.0f) {
+      float processed = raw;
+      if (tempScale == 'F') processed = 9.0f / 5.0f * processed + 32.0f;
+      processed += (float)tempOffset;
+      g_pidInput = processed;
+    }
   }
   xSemaphoreGive(mutex);
 }
@@ -242,7 +255,7 @@ void readTemps(Adafruit_MAX31856 &thermocouple) {
 // ── ADS1220 driver ────────────────────────────────────────────────────────────
 
 #ifdef TC_DRIVER_ADS1220
-void setupADS1220(ADS1220_WE &ads) {
+void setupThermocouple(ADS1220_WE &ads) {
   bool ok = false;
   while (!ok) {
     xSemaphoreTake(g_spiMutex, portMAX_DELAY);
@@ -360,6 +373,11 @@ void check_faults() {
   bool fault = (V_TC > table[table.size() - 1].milliVolts);
   xSemaphoreTake(mutex, portMAX_DELAY);
   g_tcFault = fault;
+  if (fault) {
+    snprintf(g_initErr, sizeof(g_initErr), "TC OPEN or over-range");
+  } else {
+    g_initErr[0] = '\0';
+  }
   xSemaphoreGive(mutex);
 }
 
@@ -386,6 +404,7 @@ bool readCSV(const char* filePath, std::vector<TC_TABLE>& table) {
 }
 
 float findClosestTemperature(float voltage, const std::vector<TC_TABLE>& table) {
+  // If voltage is outside the table bounds, return the closest temperature without extrapolation
   if (voltage <= table.front().milliVolts) return (float)table.front().temperature;
   if (voltage >= table.back().milliVolts)  return (float)table.back().temperature;
 
@@ -394,15 +413,17 @@ float findClosestTemperature(float voltage, const std::vector<TC_TABLE>& table) 
     size_t mid = (low + high) / 2;
     if      (table[mid].milliVolts < voltage) low  = mid + 1;
     else if (table[mid].milliVolts > voltage) high = mid - 1;
-    else return (float)table[mid].temperature;
+    else return (float)table[mid].temperature; // exact match, no interpolation needed
   }
 
+  // linear interpolation step (low = index of smallest entry greater than temp)
   float slope = (float)(table[low].temperature - table[low - 1].temperature) /
-                        (table[low].milliVolts  - table[low - 1].milliVolts);
+                        (table[low].milliVolts  - table[low - 1].milliVolts); // (degC/mV)
   return table[low - 1].temperature + slope * (voltage - table[low - 1].milliVolts);
 }
 
 float findClosestVoltage(int temperature, const std::vector<TC_TABLE>& table) {
+  // If temperature is outside the table bounds, return the closest voltage without extrapolation
   if (temperature <= table.front().temperature) return table.front().milliVolts;
   if (temperature >= table.back().temperature)  return table.back().milliVolts;
 
@@ -411,11 +432,11 @@ float findClosestVoltage(int temperature, const std::vector<TC_TABLE>& table) {
     size_t mid = (low + high) / 2;
     if      (table[mid].temperature < temperature) low  = mid + 1;
     else if (table[mid].temperature > temperature) high = mid - 1;
-    else return table[mid].milliVolts;
+    else return table[mid].milliVolts; // exact match, no interpolation needed
   }
 
   float slope = (table[low].milliVolts - table[low - 1].milliVolts) /
-                (float)(table[low].temperature - table[low - 1].temperature);
+                (float)(table[low].temperature - table[low - 1].temperature); // (mV/degC)
   return table[low - 1].milliVolts + slope * (temperature - table[low - 1].temperature);
 }
 #endif

@@ -81,7 +81,29 @@ void gui_start() {
 
 void gui_run() {
 
-  xSemaphoreTake(disp_mutex, portMAX_DELAY);  
+  xSemaphoreTake(disp_mutex, portMAX_DELAY);
+
+  if (!SIMULATION) {
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    bool tcFault  = g_tcFault;
+    bool tcReady  = g_tcInitialized;
+    char errMsg[64];
+    strlcpy(errMsg, g_initErr, sizeof(errMsg));
+    xSemaphoreGive(mutex);
+
+    if (tcFault || (!tcReady && errMsg[0] != '\0')) {
+      tft.fillScreen(TFT_BLACK);
+      tft.setTextColor(TFT_RED, TFT_BLACK);
+      tft.setTextSize(3);
+      tftPrintCenterWidth("TC ERROR", 70);
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      tft.setTextSize(2);
+      tftPrintCenterWidth(errMsg, 130);
+      tftPrintCenterWidth("Restart controller", 180);
+      xSemaphoreGive(disp_mutex);
+      return;
+    }
+  }
 
   disp_top_bar();
 
