@@ -1,6 +1,7 @@
 # ESP32 Electric Kiln Controller
 
 ![Kiln Controller Demo](assets/imageOfController.png)
+![The Controller Elias and we made](assets/eliasController.jpeg)
 
 This project is an open-source, DIY controller for electric kilns. It uses an ESP32 microcontroller to provide PID temperature control, a TFT display as an HMI, a web interface for creating and managing firing schedules and real-time data logging capability with InfluxDB and visualization in Grafana.
 
@@ -54,13 +55,6 @@ const bool SIMULATION = false;
 ```
 (future feature: toggle simulation mode via TFT screen or web config portal)
 
-### Optional ADS1220 thermocouple amplifier
-The ADS1220 thermocouple software and electronics design are based on the following article: [TI Precision Deisgns: Precision Thermocouple Measurement with the ADS1118](https://www.ti.com/lit/ug/slau509/slau509.pdf?ts=1700893585527&ref_url=https%253A%252F%252Fwww.google.com%252F)
-
-The article is very informative and definetely worth a read to better understand how the Electric Kiln Controller reads temperatures using the ADS1220 ADC. 
-
-For generating the necessary lookup tables I created a [python notebook](./TC%20table%20optimization/ThermocoupleCSV.ipynb) which uses the NIST ITS-90 Thermocouple Database. The generated lookup tables csv files are then uploaded to the `data/` folder which is then uploaded to ESP32's flash. The notebook is quite self explanatory, includes a testing section for validation and can be extended to generate more than the available (K, R, S) thermocouple tables by simply loading the respective NIST table.
-
 ### Installation Steps
 
 1. **Clone the repository:**
@@ -80,7 +74,7 @@ For generating the necessary lookup tables I created a [python notebook](./TC%20
 
 ## Configuration and Usage
 
-The TFT display serves as the user interface together with the three push buttons next to it (Up, Select and Down).
+The TFT display acts as the user interface together with the three push buttons next to it (Up, Select and Down).
 
 The screen always shows a topbar with:
 - Left corner: InfluxDB status: green checkmark = OK, red cross = FAIL.
@@ -140,10 +134,10 @@ To set up InfluxDB Cloud and Grafana for visualization:
 2. Generate an API token with write access.
 3. In Grafana, add InfluxDB as a data source and import the sample dashboard from `/grafana/dashboard.json`.
 
-> **After importing the dashboard**, you'll need to update two things to match your setup:
-> - **Datasource**: In each panel's query editor, switch the datasource to your own InfluxDB datasource.
-> - **Bucket name**: The queries reference a bucket named `"Station of Analysis"` — update them to match whatever you named yours.
-> - **Measurement name**: If you change the default data point name `"HORNO ELECTRICO"` (`/lib/task/database_task.cpp`) make sure to change this in the grafana data selector.
+ **After importing the dashboard**, you'll need to update two things to match your setup:
+ - **Datasource**: In each panel's query editor, switch the datasource to your own InfluxDB datasource.
+ - **Bucket name**: The queries reference a bucket named `"Station of Analysis"` — update them to match whatever you named yours.
+ - **Measurement name**: If you change the default data point name `"HORNO ELECTRICO"` (`/lib/task/database_task.cpp`) make sure to change this in the grafana data selector.
 
 ![grafana](/assets/grafana.jpeg) 
 ### OTA Firmware Updates (not tested)
@@ -174,7 +168,7 @@ Contributions are welcome! Feel free to open an issue or submit a pull request.
 
 ## To Do
 1. Web server doesn't start until restart after wifi credentials are set. Trigger restart or what to do?
-2. MAX31856 capability + configure thermocouple from tft screen
+2. MAX31855 capability (max31856 shortage)
 3. Autotune PID ala https://github.com/hirschmann/pid-autotune/blob/master/autotune.py
 4. advertising of project via forums/rdit/utube
 

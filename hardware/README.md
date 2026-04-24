@@ -43,6 +43,12 @@ Since these modifications are custom and would be a lot of work for anybody, the
 1. Finish the ADS1220 PCB design and fabricate it, testing it works as expected.
 2. Use the MAX31856 PCB design. Software needs added compatibility of MAX31856 library (easy). Hardware will need a hack to use the safety relay (easy, use any pin to drive relay board directly).
 
+### Optional ADS1220 thermocouple amplifier
+The ADS1220 thermocouple software and electronics design are based on the following article: [TI Precision Deisgns: Precision Thermocouple Measurement with the ADS1118](https://www.ti.com/lit/ug/slau509/slau509.pdf?ts=1700893585527&ref_url=https%253A%252F%252Fwww.google.com%252F)
+
+The article is very informative and definetely worth a read to better understand how the Electric Kiln Controller reads temperatures using the ADS1220 ADC. 
+
+For generating the necessary lookup tables I created a [python notebook](./TC%20table%20optimization/ThermocoupleCSV.ipynb) which uses the NIST ITS-90 Thermocouple Database. The generated lookup tables csv files are then uploaded to the `data/` folder which is then uploaded to ESP32's flash. The notebook is quite self explanatory, includes a testing section for validation and can be extended to generate more than the available (K, R, S) thermocouple tables by simply loading the respective NIST table.
 
 ### New PCB to-do list:
 
