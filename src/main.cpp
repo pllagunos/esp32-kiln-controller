@@ -6,12 +6,12 @@
 #include "userSetup.h"      // Setup user variables (CHANGE THESE IN HEADER FILE)
 #include "common.h"         // Common variables and functions
 
-#include "gui.h"            // Graphical user interface source file
-#include "heat_control.h"   // PID and heating control code
-#include "network.h"        // WiFi and Server related code
-#include "ota_task.h"       // OTA firmware update task
-#include "database_task.h"  // Influx DB publishing task
-#include "sensor_task.h"    // Thermocouple reading task
+#include "gui/gui.h"            // Graphical user interface source file
+#include "control/heat_controller.h"   // PID and heating control code
+#include "network/network.h"        // WiFi and Server related code
+#include "ota/ota.h"       // OTA firmware update task
+#include "telemetry/telemetry.h"  // Influx DB publishing task
+#include "sensors/sensors.h"    // Thermocouple reading task
 
 // global (shared) variables definition
 double g_pidInput;
@@ -36,7 +36,7 @@ String g_ota_latest_tag;
 SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
 SemaphoreHandle_t disp_mutex = xSemaphoreCreateMutex();
 SemaphoreHandle_t g_spiMutex = xSemaphoreCreateMutex();
-heat_control controller(mutex);
+HeatController controller(mutex);
 Network network(mutex, SPIFFS);
 
 // put function declarations here:
@@ -71,8 +71,8 @@ void setup() {
   xTaskCreatePinnedToCore(main_task, "Main", 8192, NULL, 1, NULL, 1);
   // Create the sensor task and set its affinity to core 1
   xTaskCreatePinnedToCore(sensor_task, "Sensor", 8192, NULL, 1, NULL, 1); 
-  // Create the publishing task and set its affinity to core 0
-  xTaskCreatePinnedToCore(database_task, "Database", 32768, NULL, 1, NULL, 0);
+  // Create the telemetry task and set its affinity to core 0
+  xTaskCreatePinnedToCore(telemetry_task, "Telemetry", 32768, NULL, 1, NULL, 0);
   // Create the OTA task and set its affinity to core 0
   xTaskCreatePinnedToCore(ota_task, "OTA", 32768, NULL, 1, NULL, 0);
 

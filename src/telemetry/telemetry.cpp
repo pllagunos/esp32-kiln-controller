@@ -5,16 +5,14 @@
 #include "common.h"
 #include "userSetup.h"
 
-#include "network.h"
-#include "database_task.h"
+#include "../network/network.h"
+#include "telemetry.h"
 
 extern Network network;
 
-static const char *TAG = "database_task";
-
 Point sensor("HORNO ELECTRICO");
 
-void database_task(void* parameter) {
+void telemetry_task(void* parameter) {
   InfluxDBClient* client = nullptr;
   bool connected = false;
   bool prevConnected = false;

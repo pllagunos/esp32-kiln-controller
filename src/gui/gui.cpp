@@ -8,11 +8,11 @@
 #include "userSetup.h"
 #include "common.h"
 
-#include "network.h"
-#include "heat_control.h"
+#include "../network/network.h"
+#include "../control/heat_controller.h"
 #include "gui.h"
 
-extern heat_control controller;
+extern HeatController controller;
 extern Network network;
 
 static const char *TAG = "gui";

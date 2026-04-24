@@ -1,11 +1,11 @@
-#include "heat_control.h"
+#include "heat_controller.h"
 
-heat_control::heat_control(SemaphoreHandle_t &mutex) 
+HeatController::HeatController(SemaphoreHandle_t &mutex) 
 : mutex(mutex),
   pidCont(&pidInput, &pidOutput, &pidSetPoint, Kp, Ki, Kd, DIRECT) {
 }
 
-void heat_control::run() {
+void HeatController::run() {
   safetyCheck();
 
   // Do heating cycle if there is a segment to run
@@ -31,7 +31,7 @@ void heat_control::run() {
 }
 
 // adjustHeat: CONTROL THE HEATING ELEMENT
-void heat_control::adjustHeat() {
+void HeatController::adjustHeat() {
   if (millis() - heatStart >= heatingCycle) { 
     heatStart = millis();
   } 
@@ -50,7 +50,7 @@ void heat_control::adjustHeat() {
 }
 
 //  SHUTDOWN: SHUT DOWN SYSTEM
-void heat_control::shutDown() {
+void HeatController::shutDown() {
   // Disconnect power
   digitalWrite(relayPin, HIGH);
   // Turn off heating element relay
@@ -60,7 +60,7 @@ void heat_control::shutDown() {
 }
 
 // SAFETYCHECK: CHECK IF TEMP IS TOO HIGH
-void heat_control::safetyCheck() {
+void HeatController::safetyCheck() {
   if (fault) {
     shutDown();
     disp_error_msg("Thermocouple Error", "System was shut down", "Press RESET to restart");
@@ -82,7 +82,7 @@ void heat_control::safetyCheck() {
 }
 
 //  CHECKDOORISR: CHECK DOOR
-void heat_control::checkDoor() {
+void HeatController::checkDoor() {
   doorClosed_before = doorClosed;            // save previous door state
   if (digitalRead(limitSwitchPin) == LOW) {  // check new door state
     doorClosed = true;                       // door closed
@@ -103,7 +103,7 @@ void heat_control::checkDoor() {
 }
 
 //  UPDATEPIDS: UPDATE THE PID LOOPS
-void heat_control::updatePIDs() {
+void HeatController::updatePIDs() {
   // Update the PID controller based on new variables 
   pidCont.Compute();  // (internally it will only compute if sample time has been elapsed)
 
@@ -148,7 +148,7 @@ void heat_control::updatePIDs() {
 }
 
 //  UPDATESEG: UPDATE THE PHASE AND SEGMENT
-void heat_control::updateSeg() {
+void HeatController::updateSeg() {
 
   // No need to update if not in auto mode
   if (firingMode == FiringModes::manual) {
@@ -189,7 +189,7 @@ void heat_control::updateSeg() {
 }
 
 //  SETUPPIDS: INITIALIZE THE PID LOOPS
-void heat_control::setupPIDs(int state) {
+void HeatController::setupPIDs(int state) {
   // standard period is equal to heating cycle
   if (SIMULATION) {
     int newSampleTime = (heatingCycle/(int)alpha);
@@ -210,7 +210,7 @@ void heat_control::setupPIDs(int state) {
 }
 
 // Log data to SPIFFS
-void heat_control::logData() {
+void HeatController::logData() {
   float elapsed_seconds = (millis()-programStart) * alpha / 1000.0; 
   int hours = (int) elapsed_seconds / 3600;
   int mins = ((int) elapsed_seconds % 3600) / 60;
@@ -232,7 +232,7 @@ void heat_control::logData() {
 }
 
 // SP is set equal to PV
-void heat_control::SPequalPV() {
+void HeatController::SPequalPV() {
   lastTemp = pidInput;
 }
 
@@ -240,23 +240,23 @@ void heat_control::SPequalPV() {
 // Getter / Setter functions
 // *****************************
 
-void heat_control::setMode(FiringModes mode) {
+void HeatController::setMode(FiringModes mode) {
   firingMode = mode;
 }
 
-double heat_control::getPV() {
+double HeatController::getPV() {
   return pidInput;
 }
 
-double heat_control::getSP() {
+double HeatController::getSP() {
   return pidSetPoint;
 }
 
-void heat_control::setSetPoint(int value) {
+void HeatController::setSetPoint(int value) {
   manualSetPoint = value;
 }
 
-void heat_control::setSegNum(int value) {
+void HeatController::setSegNum(int value) {
   segNum = value;
   // user manually moved to next segment
   if (segNum > 1 && segNum <= currentProgram.segmentQuantity) {
@@ -265,30 +265,30 @@ void heat_control::setSegNum(int value) {
   }
 }
 
-int heat_control::getSegNum() const {
+int HeatController::getSegNum() const {
   return segNum;
 }
 
-void heat_control::setLastTemp() {
+void HeatController::setLastTemp() {
   lastTemp = pidInput;
 }
 
-void heat_control::setHeatStart(unsigned long value) {
+void HeatController::setHeatStart(unsigned long value) {
   heatStart = value;
 }
 
-void heat_control::setRampStart(unsigned long value) {
+void HeatController::setRampStart(unsigned long value) {
   rampStart = value;
 }
 
-void heat_control::setProgramStart(unsigned long value) {
+void HeatController::setProgramStart(unsigned long value) {
   programStart = value;
 }
 
-bool heat_control::getIsOnHold() const {
+bool HeatController::getIsOnHold() const {
   return isOnHold;
 }
 
-double heat_control::getHoldMins() const{
+double HeatController::getHoldMins() const{
   return holdMins;
 }

@@ -1,19 +1,19 @@
-// HeatControl.h
-#ifndef HEAT_CONTROL_H
-#define HEAT_CONTROL_H
+// heat_controller.h
+#ifndef HEAT_CONTROLLER_H
+#define HEAT_CONTROLLER_H
 
 #include <Arduino.h>
 #include <PID_v1.h>
 
 #include "common.h"
-#include "gui.h"
+#include "../gui/gui.h"
 #include "userSetup.h"
 
-class heat_control {
+class HeatController {
 public:
   SemaphoreHandle_t &mutex;
   
-  heat_control(SemaphoreHandle_t &mutex);
+  HeatController(SemaphoreHandle_t &mutex);
 
   void run();
   void shutDown();
@@ -66,4 +66,4 @@ private:
   PID pidCont;
 };
 
-#endif // HEAT_CONTROL_H
+#endif // HEAT_CONTROLLER_H

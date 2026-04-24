@@ -5,7 +5,7 @@
 #include <Update.h>
 
 #include "common.h"
-#include "ota_task.h"
+#include "ota.h"
 
 #ifndef OTA_VERSION
   #define OTA_VERSION "local_development"

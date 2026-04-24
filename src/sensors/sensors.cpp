@@ -13,11 +13,8 @@
 #include <Adafruit_MAX31856.h>
 #endif
 
-#include "sensor_task.h"
-#include "heat_control.h"
-#include "gui.h"
-
-extern heat_control controller;
+#include "sensors.h"
+// #include "gui/gui.h"
 
 static const char* TAG = "sensor_task";
 
