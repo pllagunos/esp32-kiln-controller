@@ -12,7 +12,7 @@
 #endif
 
 static const char* GITHUB_OWNER   = "pllagunos";
-static const char* GITHUB_REPO    = "ElectricKiln";
+static const char* GITHUB_REPO    = "esp32-kiln-controller";
 static const char* FIRMWARE_ASSET = "esp32doit-devkit-v1_firmware.bin";
 
 // Root CA cert covering api.github.com (Sectigo Public Server Authentication chain, 2026).
