@@ -30,6 +30,9 @@ jobs:
       - name: Build firmware
         run: platformio run --environment esp32doit-devkit-v1
 
+      - name: Build SPIFFS image
+        run: platformio run --target buildfs --environment esp32doit-devkit-v1
+
       - name: Upload firmware to release
         uses: actions/upload-release-asset@v1
         env:
@@ -40,15 +43,26 @@ jobs:
           asset_name: esp32doit-devkit-v1_firmware.bin
           asset_content_type: application/octet-stream
 
-      - name: Append firmware MD5 to release notes
+      - name: Upload SPIFFS image to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: .pio/build/esp32doit-devkit-v1/spiffs.bin
+          asset_name: esp32doit-devkit-v1_spiffs.bin
+          asset_content_type: application/octet-stream
+
+      - name: Append MD5 checksums to release notes
         run: |
-          MD5=$(md5sum .pio/build/esp32doit-devkit-v1/firmware.bin | awk '{print $1}')
+          FIRMWARE_MD5=$(md5sum .pio/build/esp32doit-devkit-v1/firmware.bin | awk '{print $1}')
+          SPIFFS_MD5=$(md5sum .pio/build/esp32doit-devkit-v1/spiffs.bin | awk '{print $1}')
           RELEASE_ID="${{ github.event.release.id }}"
           EXISTING_BODY=$(curl -s \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}" \
             | jq -r .body)
-          NEW_BODY=$(printf '%s\n\nFirmware MD5: %s' "$EXISTING_BODY" "$MD5")
+          NEW_BODY=$(printf '%s\n\nFirmware MD5: %s\nSPIFFS MD5: %s' "$EXISTING_BODY" "$FIRMWARE_MD5" "$SPIFFS_MD5")
           curl -s -X PATCH \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \

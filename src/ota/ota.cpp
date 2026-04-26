@@ -14,6 +14,7 @@
 static const char* GITHUB_OWNER   = "pllagunos";
 static const char* GITHUB_REPO    = "esp32-kiln-controller";
 static const char* FIRMWARE_ASSET = "esp32doit-devkit-v1_firmware.bin";
+static const char* SPIFFS_ASSET   = "esp32doit-devkit-v1_spiffs.bin";
 
 // Root CA cert covering api.github.com (Sectigo Public Server Authentication chain, 2026).
 // Intermediate: Sectigo Public Server Authentication CA DV E36
@@ -67,6 +68,8 @@ static String s_latest_version;
 static String s_latest_tag;
 static String s_firmware_url;
 static String s_firmware_md5;
+static String s_spiffs_url;
+static String s_spiffs_md5;
 
 static bool checkForUpdate() {
   // Clear stale state so any failure leaves them empty (prevents masking errors as UP_TO_DATE)
@@ -74,6 +77,8 @@ static bool checkForUpdate() {
   s_latest_tag     = "";
   s_firmware_url   = "";
   s_firmware_md5   = "";
+  s_spiffs_url     = "";
+  s_spiffs_md5     = "";
 
   WiFiClientSecure secure;
   secure.setCACert(GITHUB_CA);
@@ -105,8 +110,8 @@ static bool checkForUpdate() {
   s_latest_version = doc["name"].as<String>();
   s_latest_tag     = doc["tag_name"].as<String>();
 
-  // Parse MD5 from release body — CI embeds "Firmware MD5: <hash>" so it is fetched
-  // over the already-verified api.github.com connection rather than the insecure CDN.
+  // Parse MD5s from release body — CI embeds them over the already-verified
+  // api.github.com connection rather than the insecure CDN.
   String body = doc["body"].as<String>();
   int mdxIdx = body.indexOf("Firmware MD5: ");
   if (mdxIdx >= 0) {
@@ -114,12 +119,20 @@ static bool checkForUpdate() {
     s_firmware_md5.trim();
     s_firmware_md5.toLowerCase();
   }
+  int spiffsIdx = body.indexOf("SPIFFS MD5: ");
+  if (spiffsIdx >= 0) {
+    s_spiffs_md5 = body.substring(spiffsIdx + 12, spiffsIdx + 44);
+    s_spiffs_md5.trim();
+    s_spiffs_md5.toLowerCase();
+  }
 
   JsonArray assets = doc["assets"];
   for (JsonObject asset : assets) {
-    if (asset["name"].as<String>() == String(FIRMWARE_ASSET)) {
+    String name = asset["name"].as<String>();
+    if (name == String(FIRMWARE_ASSET)) {
       s_firmware_url = asset["browser_download_url"].as<String>();
-      break;
+    } else if (name == String(SPIFFS_ASSET)) {
+      s_spiffs_url = asset["browser_download_url"].as<String>();
     }
   }
 
@@ -129,20 +142,17 @@ static bool checkForUpdate() {
   return different && hasAsset;
 }
 
-static bool performUpdate() {
-  // GitHub release assets redirect to objects.githubusercontent.com (different CA chain).
-  // The firmware MD5 was fetched from the trusted api.github.com response; calling
-  // Update.setMD5() here ensures a tampered or corrupted binary is rejected.
+static bool flashPartition(const String& url, const String& md5, int command) {
   WiFiClientSecure secure;
   secure.setInsecure();
 
   HTTPClient http;
-  http.begin(secure, s_firmware_url);
+  http.begin(secure, url);
   http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
 
   int code = http.GET();
   if (code != 200) {
-    log_e("Firmware download returned %d", code);
+    log_e("Download returned %d", code);
     http.end();
     return false;
   }
@@ -154,15 +164,15 @@ static bool performUpdate() {
     return false;
   }
 
-  if (!Update.begin(contentLength, U_FLASH)) {
-    log_e("Not enough space for OTA, error: %d", Update.getError());
+  if (!Update.begin(contentLength, command)) {
+    log_e("Not enough space for update, error: %d", Update.getError());
     http.end();
     return false;
   }
 
-  if (!s_firmware_md5.isEmpty()) {
-    Update.setMD5(s_firmware_md5.c_str());
-    log_i("MD5 verification enabled: %s", s_firmware_md5.c_str());
+  if (!md5.isEmpty()) {
+    Update.setMD5(md5.c_str());
+    log_i("MD5 verification enabled: %s", md5.c_str());
   } else {
     log_w("No MD5 in release notes — skipping integrity check");
   }
@@ -183,6 +193,22 @@ static bool performUpdate() {
   if (!Update.end(true)) {
     log_e("Update.end() failed, error: %d", Update.getError());
     return false;
+  }
+
+  return true;
+}
+
+static bool performUpdate() {
+  log_i("Flashing firmware…");
+  if (!flashPartition(s_firmware_url, s_firmware_md5, U_FLASH)) {
+    return false;
+  }
+
+  if (!s_spiffs_url.isEmpty()) {
+    log_i("Flashing SPIFFS partition…");
+    if (!flashPartition(s_spiffs_url, s_spiffs_md5, U_SPIFFS)) {
+      log_w("SPIFFS flash failed — device will restart with new firmware only");
+    }
   }
 
   return true;
