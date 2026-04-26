@@ -24,6 +24,11 @@ bool Network::checkWiFi() {
       log_i("Credentials changed. Initializing WiFi again.\n");
       receivedCredentials = false;
       loadWifiCredentials();
+      if (pendingCaptiveExit) {
+        // Switch to combined AP+STA so we can attempt STA while AP stays alive
+        WiFi.mode(WIFI_AP_STA);
+        WiFi.softAP("ESP32 Kiln Controller", NULL);
+      }
     }
 
     // Attempt WiFi connection
@@ -57,7 +62,26 @@ bool Network::checkWiFi() {
     xSemaphoreTake(mutex, portMAX_DELAY);
     g_connecting = false;
     xSemaphoreGive(mutex);
-  }
+
+    if (pendingCaptiveExit) {
+      pendingCaptiveExit = false;
+      if (connected) {
+        // Successfully connected — shut down the AP and DNS
+        dnsServer.stop();
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+        log_i("Captive portal exited — connected to %s at %s\n",
+              WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+      } else {
+        // Failed — go back to captive mode
+        captive_mode = true;
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP("ESP32 Kiln Controller", NULL);
+        log_w("WiFi connection failed — returning to captive mode\n");
+      }
+    }
+
+  }  // end if (!captive_mode)
 
   xSemaphoreTake(mutex, portMAX_DELAY);
   g_connected = connected;
@@ -108,6 +132,17 @@ void Network::setupServer() {
   // Route for WiFi manager config page
   server.on("/wifi-manager", HTTP_GET, [this](AsyncWebServerRequest* request) {
     request->send(fileSystem, "/wifimanager.html", "text/html");
+  });
+
+  // Returns current WiFi connection status and IP address for the captive portal connect flow
+  server.on("/getWifiStatus", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    bool connected = (WiFi.status() == WL_CONNECTED);
+    StaticJsonDocument<128> json;
+    json["connected"] = connected;
+    if (connected) json["ip"] = WiFi.localIP().toString();
+    String output;
+    serializeJson(json, output);
+    request->send(200, "application/json", output);
   });
 
   // Route for the InfluxDB manager config page
@@ -316,11 +351,12 @@ void Network::setupServer() {
     // Add the new credentials to the JSON array
     if (!ssid.isEmpty() && !password.isEmpty()) {
         addWifiCredentials(ssid, password);
+        receivedCredentials = true;
+        captive_mode = false;
+        pendingCaptiveExit = true;
     }
-    receivedCredentials = true;
 
-    // Go back to the main page
-    request->send(fileSystem, "/index.html", "text/html");
+    request->send(200, "application/json", "{\"status\":\"connecting\"}");
   });
 
   // Saving InfluxDB credentials

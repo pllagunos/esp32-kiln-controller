@@ -27,6 +27,9 @@ jobs:
           RELEASE_TAG="${{ github.event.release.tag_name }}"
           sed -i "s|'-DOTA_VERSION=\"local_development\"'|'-DOTA_VERSION=\"${RELEASE_TAG}\"'|" platformio.ini
 
+      - name: Set SPIFFS version from release tag
+        run: echo "${{ github.event.release.tag_name }}" > data/spiffs_version.txt
+
       - name: Build firmware
         run: platformio run --environment esp32doit-devkit-v1
 

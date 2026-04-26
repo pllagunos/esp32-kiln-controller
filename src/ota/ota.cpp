@@ -3,6 +3,8 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Update.h>
+#include <SPIFFS.h>
+#include <vector>
 
 #include "common.h"
 #include "ota.h"
@@ -198,6 +200,51 @@ static bool flashPartition(const String& url, const String& md5, int command) {
   return true;
 }
 
+// Backs up all user JSON files, flashes the new SPIFFS image, then restores them.
+// This preserves firing programs, WiFi credentials, and InfluxDB settings.
+static bool preserveAndFlashSPIFFS() {
+  struct SavedFile { String path; std::vector<uint8_t> data; };
+  std::vector<SavedFile> preserved;
+
+  File root = SPIFFS.open("/");
+  if (root) {
+    for (File f = root.openNextFile(); f; f = root.openNextFile()) {
+      String path = f.name();
+      if (path.endsWith(".json") && !f.isDirectory()) {
+        SavedFile sf;
+        sf.path = path;
+        sf.data.resize(f.size());
+        if (f.read(sf.data.data(), sf.data.size()) == sf.data.size()) {
+          preserved.push_back(std::move(sf));
+          log_i("Preserving %s (%u bytes)", path.c_str(), preserved.back().data.size());
+        }
+      }
+      f.close();
+    }
+    root.close();
+  }
+
+  if (!flashPartition(s_spiffs_url, s_spiffs_md5, U_SPIFFS)) return false;
+
+  SPIFFS.end();
+  if (!SPIFFS.begin(true)) {
+    log_e("Failed to remount SPIFFS after flash");
+    return false;
+  }
+
+  for (auto& sf : preserved) {
+    File out = SPIFFS.open(sf.path, FILE_WRITE);
+    if (out) {
+      out.write(sf.data.data(), sf.data.size());
+      out.close();
+      log_i("Restored %s", sf.path.c_str());
+    } else {
+      log_w("Failed to restore %s", sf.path.c_str());
+    }
+  }
+  return true;
+}
+
 static bool performUpdate() {
   log_i("Flashing firmware…");
   if (!flashPartition(s_firmware_url, s_firmware_md5, U_FLASH)) {
@@ -205,9 +252,19 @@ static bool performUpdate() {
   }
 
   if (!s_spiffs_url.isEmpty()) {
-    log_i("Flashing SPIFFS partition…");
-    if (!flashPartition(s_spiffs_url, s_spiffs_md5, U_SPIFFS)) {
-      log_w("SPIFFS flash failed — device will restart with new firmware only");
+    // Only flash SPIFFS if its version differs from the current one to avoid
+    // unnecessary flashes (and the associated preserve/restore cycle).
+    String currentSpiffsVersion;
+    File vf = SPIFFS.open("/spiffs_version.txt", FILE_READ);
+    if (vf) { currentSpiffsVersion = vf.readString(); currentSpiffsVersion.trim(); vf.close(); }
+
+    if (currentSpiffsVersion == s_latest_tag) {
+      log_i("SPIFFS already at version %s — skipping flash", s_latest_tag.c_str());
+    } else {
+      log_i("Flashing SPIFFS (current: %s → new: %s)…", currentSpiffsVersion.c_str(), s_latest_tag.c_str());
+      if (!preserveAndFlashSPIFFS()) {
+        log_w("SPIFFS flash failed — device will restart with new firmware only");
+      }
     }
   }
 

@@ -85,6 +85,7 @@ private:
   bool server_started = false;
   bool receivedCredentials = false;
   bool receivedInfluxCredentials = false;
+  bool pendingCaptiveExit = false;
   unsigned long lastSSIDUpdate;
 
   ProgramCatalogEntry catalog_[PROGRAM_CATALOG_MAX];

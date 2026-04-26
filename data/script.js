@@ -141,21 +141,44 @@ window.onload = function () {
   }
 };
 
-// Send WiFi manager form
+// Send WiFi manager form and poll for connection result
 function sendWifiManagerForm() {
   const form = document.getElementById('wifiManagerForm');
   const formData = new FormData(form);
 
-  fetch('/wifi-manager', {
-    method: 'POST',
-    body: formData
-  })
-    .then(response => response.text())
-    .then(result => {
-      console.log(result);
-      // Redirect to the home page (index.html)
-      window.location.href = '/index.html';
-    })
+  // Replace form with a live status message
+  const statusEl = document.createElement('p');
+  statusEl.id = 'wifiStatus';
+  statusEl.textContent = 'Connecting to WiFi…';
+  form.replaceWith(statusEl);
+
+  fetch('/wifi-manager', { method: 'POST', body: formData }).then(() => {
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries++;
+      fetch('/getWifiStatus')
+        .then(r => r.json())
+        .then(data => {
+          if (data.connected) {
+            clearInterval(timer);
+            document.getElementById('wifiStatus').innerHTML =
+              '✓ Connected! Device IP: <strong>' + data.ip + '</strong>.<br>' +
+              'Reconnect to your home network and navigate to ' +
+              '<a href="http://' + data.ip + '">http://' + data.ip + '</a>.';
+          } else if (tries >= 15) {
+            clearInterval(timer);
+            document.getElementById('wifiStatus').innerHTML =
+              '✗ Connection failed. <a href="/wifi-manager">Try again</a>.';
+          }
+        })
+        .catch(() => {
+          // The AP went away — device is likely connected and stopped broadcasting
+          clearInterval(timer);
+          document.getElementById('wifiStatus').textContent =
+            'Device has connected — reconnect to your home network.';
+        });
+    }, 2000);
+  });
 }
 
 // Pre-fill InfluxDB form with current saved credentials
