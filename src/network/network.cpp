@@ -290,7 +290,7 @@ void Network::setupServer() {
 
   // Retrieving available SSIDs
   server.on("/getSSIDList", HTTP_GET, [this](AsyncWebServerRequest *request) {
-    Serial.println("getting SSIDs");
+    log_i("getting SSIDs \n");
     request->send(200, "application/json", ssidList); // sent as a JSON array
   });
 
@@ -303,12 +303,12 @@ void Network::setupServer() {
         // HTTP POST ssid value
         if (p->name() == "ssid") {
           ssid = p->value().c_str();
-          Serial.printf("Received SSID: %s\n", ssid);
+          log_i("Received SSID: %s\n", ssid);
         }
         // HTTP POST pass value
         if (p->name() == "password") {
           password = p->value().c_str();
-          Serial.printf("Received Password: %s\n", password);
+          log_i("Received Password: %s\n", password);
         }
       }
     }
@@ -356,7 +356,7 @@ void Network::StartCaptivePortal() {
   log_i("Setting up AP Mode\n");
 
   WiFi.mode(WIFI_AP);
-  WiFi.softAP("The Kiln Controller", NULL);
+  WiFi.softAP("ESP32 Kiln Controller", NULL);
   log_i("AP IP address: %s\n", WiFi.softAPIP().toString().c_str());
 
   log_i("Starting DNS Server\n");

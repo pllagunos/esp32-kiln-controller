@@ -133,10 +133,12 @@ function updateSSIDList() {
     })
 }
 
-// Call the function on page load
+// Call the function on page load — only when on the WiFi manager page
 window.onload = function () {
-  updateSSIDList();
-  setInterval(updateSSIDList, 15000); // Update every 15 seconds
+  if (document.getElementById('SSID1')) {
+    updateSSIDList();
+    setInterval(updateSSIDList, 15000); // Update every 15 seconds
+  }
 };
 
 // Send WiFi manager form
