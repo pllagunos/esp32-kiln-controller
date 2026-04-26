@@ -44,7 +44,7 @@ void telemetry_task(void* parameter) {
       xSemaphoreGive(mutex);
 
       if (!cfg.configured) {
-        Serial.println("InfluxDB not configured. Skipping publish.");
+        log_i("InfluxDB not configured. Skipping publish.\n");
         published = false;
         vTaskDelay(5000 / portTICK_PERIOD_MS);
         continue;
@@ -82,8 +82,7 @@ void telemetry_task(void* parameter) {
 
       published = client->writePoint(sensor);
       if (!published) {
-        Serial.print("InfluxDB write failed: ");
-        Serial.println(client->getLastErrorMessage());
+        log_i("InfluxDB write failed: %s\n", client->getLastErrorMessage());
       }
     }
 
