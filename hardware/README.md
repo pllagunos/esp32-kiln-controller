@@ -8,6 +8,10 @@ Using the latest PCB and a two phase 220VAC system, a hardware connection of the
 The electrical schematic can be adapter to one's system easily. However for safety related reasons one should always include: overcurrent protection, relay + SSR, door switch.
 > **WARNING**: Wiring high voltage AC systems is a dangerous procedure if one is not familiar with mains power and safe practices. Always work with deenergized, disconnected systems. Use appropriate fuses/breakers and wires following local norms. The user is solely responsible for any damage or injury that may happen from inappropriate implementations.
 
+## License
+
+The hardware design files in this directory are licensed under the **CERN Open Hardware Licence Version 2 - Weakly Reciprocal**. See [`../LICENSE-HARDWARE`](../LICENSE-HARDWARE) for the full license text.
+
 ## Hardware Components
 
 ### Electronics

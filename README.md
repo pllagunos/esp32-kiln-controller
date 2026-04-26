@@ -174,6 +174,9 @@ Contributions are welcome! Feel free to open an issue or submit a pull request.
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+This repository uses a dual-license model:
 
-ADD THE LICENSE
+- Firmware and software source code are licensed under the **MIT License**. See [`LICENSE`](LICENSE).
+- Hardware design files in [`hardware/`](hardware/) are licensed under the **CERN Open Hardware Licence Version 2 - Weakly Reciprocal**. See [`LICENSE-HARDWARE`](LICENSE-HARDWARE).
+
+Unless otherwise noted, documentation and images in this repository are provided under the same license as the part of the project they accompany.
