@@ -202,26 +202,50 @@ static bool flashPartition(const String& url, const String& md5, int command) {
 
 // Backs up all user JSON files, flashes the new SPIFFS image, then restores them.
 // This preserves firing programs, WiFi credentials, and InfluxDB settings.
+//
+// Two-phase approach: collect paths first (iterator only), then reopen each file
+// by explicit path. This avoids an ESP32 SPIFFS bug where f.size() returns 0 for
+// files opened via openNextFile(), which would produce empty backups.
 static bool preserveAndFlashSPIFFS() {
   struct SavedFile { String path; std::vector<uint8_t> data; };
-  std::vector<SavedFile> preserved;
 
-  File root = SPIFFS.open("/");
-  if (root) {
-    for (File f = root.openNextFile(); f; f = root.openNextFile()) {
-      String path = f.name();
-      if (path.endsWith(".json") && !f.isDirectory()) {
-        SavedFile sf;
-        sf.path = path;
-        sf.data.resize(f.size());
-        if (f.read(sf.data.data(), sf.data.size()) == sf.data.size()) {
-          preserved.push_back(std::move(sf));
-          log_i("Preserving %s (%u bytes)", path.c_str(), preserved.back().data.size());
+  // Phase 1: collect JSON file paths (do not read data here — size() is unreliable)
+  std::vector<String> jsonPaths;
+  {
+    File root = SPIFFS.open("/");
+    if (root) {
+      File f = root.openNextFile();
+      while (f) {
+        if (!f.isDirectory()) {
+          String name = f.name();
+          if (!name.startsWith("/")) name = "/" + name;
+          if (name.endsWith(".json")) jsonPaths.push_back(name);
         }
+        f.close();
+        f = root.openNextFile();
       }
-      f.close();
+      root.close();
     }
-    root.close();
+  }
+
+  // Phase 2: read each file by explicit open so size() is accurate
+  std::vector<SavedFile> preserved;
+  for (const String& path : jsonPaths) {
+    File f = SPIFFS.open(path, FILE_READ);
+    if (!f) { log_w("Cannot open %s for backup", path.c_str()); continue; }
+    size_t fsize = f.size();
+    if (fsize == 0) { log_w("Skipping %s — 0 bytes", path.c_str()); f.close(); continue; }
+    SavedFile sf;
+    sf.path = path;
+    sf.data.resize(fsize);
+    size_t got = f.read(sf.data.data(), fsize);
+    f.close();
+    if (got == fsize) {
+      preserved.push_back(std::move(sf));
+      log_i("Preserving %s (%u bytes)", path.c_str(), got);
+    } else {
+      log_w("Read mismatch %s: got %u of %u bytes — skipping", path.c_str(), got, fsize);
+    }
   }
 
   if (!flashPartition(s_spiffs_url, s_spiffs_md5, U_SPIFFS)) return false;
@@ -232,16 +256,28 @@ static bool preserveAndFlashSPIFFS() {
     return false;
   }
 
+  log_i("SPIFFS free after flash: %u / %u bytes",
+        SPIFFS.totalBytes() - SPIFFS.usedBytes(), SPIFFS.totalBytes());
+
+  bool anyRestoreFailed = false;
   for (auto& sf : preserved) {
     File out = SPIFFS.open(sf.path, FILE_WRITE);
-    if (out) {
-      out.write(sf.data.data(), sf.data.size());
-      out.close();
-      log_i("Restored %s", sf.path.c_str());
+    if (!out) {
+      log_e("Cannot open %s for restore — user data lost", sf.path.c_str());
+      anyRestoreFailed = true;
+      continue;
+    }
+    size_t written = out.write(sf.data.data(), sf.data.size());
+    out.close();
+    if (written == sf.data.size()) {
+      log_i("Restored %s (%u bytes)", sf.path.c_str(), written);
     } else {
-      log_w("Failed to restore %s", sf.path.c_str());
+      log_e("Write mismatch %s: wrote %u of %u bytes — user data may be lost",
+            sf.path.c_str(), written, sf.data.size());
+      anyRestoreFailed = true;
     }
   }
+  if (anyRestoreFailed) log_e("One or more user data files were NOT fully restored");
   return true;
 }
 
@@ -293,6 +329,7 @@ void ota_task(void* parameter) {
       bool success = performUpdate();
       if (success) {
         log_i("OTA complete — restarting");
+        SPIFFS.end();  // flush write cache before hard reset
         ESP.restart();
       } else {
         xSemaphoreTake(mutex, portMAX_DELAY);
