@@ -140,37 +140,36 @@ To set up InfluxDB Cloud and Grafana for visualization:
  - **Measurement name**: If you change the default data point name `"HORNO ELECTRICO"` (`/lib/task/database_task.cpp`) make sure to change this in the grafana data selector.
 
 ![grafana](/assets/grafana.jpeg) 
-### OTA Firmware Updates (not tested)
+
+### Over the air (OTA) Firmware Updates
 
 The device can check for and install firmware updates directly from GitHub Releases — no USB cable needed after initial flashing.
 
 **How it works:**
-* When a new GitHub Release is published, the CI pipeline automatically builds the firmware, attaches `esp32doit-devkit-v1_firmware.bin` to the release, and appends the firmware's MD5 hash to the release notes.
-* The device compares the current `OTA_VERSION` build flag against the release **tag** (e.g. `v1.0.1`).
+* When a new GitHub Release is published, the CI pipeline automatically builds the firmware and filesystem image, attaches binaries to the release, and appends the firmware's MD5 hash to the release notes.
+* The device compares the current `OTA_VERSION` build flag against the release **tag**.
 * If a newer version is available, the "Update Now" button appears.
 * Firmware integrity is verified with an MD5 hash fetched from the GitHub API before flashing.
 
 **To check for updates:**
-1. Make sure the device is connected to WiFi (not in AP mode).
-2. Navigate to the device's IP address on your local network → **"Firmware Update"**.
-3. Click **"Check for Update"**. The device queries `api.github.com`.
-4. If an update is found, click **"Update Now"**. The device downloads, verifies, flashes, and restarts automatically (~60 seconds).
-5. **Do not power off the device during an update.**
+1. Make sure the device is connected to WiFi.
+2. Navigate to the device's IP address on your local network → **"Firmware Update"** → **"Check for Update"**. 
+3. If an update is found, click **"Update Now"**. The device downloads, verifies, flashes, and restarts automatically (~60 seconds).
+> **Do not power off the device during an update.**
 
 **To publish a new release (for developers):**
 1. Go to the GitHub repo → Releases → "Draft a new release".
-2. Create a tag (e.g. `v1.0.1`). The **Release title** can be anything — the device compares against the tag, not the title.
-3. Click "Publish release". GitHub Actions will build and attach the firmware binary, and append the MD5 hash to the release notes automatically (takes ~2–3 minutes).
+2. Create a tag (e.g. `v1.0.1`). The controller compares against the tag.
+3. Click "Publish release". GitHub Actions will build and attach the firmware binary, and append the MD5 hash to the release notes automatically.
 
 ## Contributing
 
 Contributions are welcome! Feel free to open an issue or submit a pull request.
 
 ## To Do
-1. Web server doesn't start until restart after wifi credentials are set. Trigger restart or what to do?
-2. MAX31855 capability (max31856 shortage)
-3. Autotune PID ala https://github.com/hirschmann/pid-autotune/blob/master/autotune.py
-4. advertising of project via forums/rdit/utube
+- [ ] MAX31855 capability (max31856 shortage)
+- [ ] Autotune PID (look for existing pid autotune projects on github)
+- [ ] advertising of project via forums/rdit/utube
 
 ## License
 
