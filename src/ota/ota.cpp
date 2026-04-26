@@ -81,6 +81,7 @@ static bool checkForUpdate() {
   HTTPClient http;
   String url = "https://api.github.com/repos/" + String(GITHUB_OWNER) + "/" + String(GITHUB_REPO) + "/releases/latest";
   http.begin(secure, url);
+  http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   http.addHeader("Accept", "application/vnd.github+json");
   http.addHeader("User-Agent", "ESP32-OTA");
   http.addHeader("X-GitHub-Api-Version", "2022-11-28");
