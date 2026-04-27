@@ -168,8 +168,7 @@ Contributions are welcome! Feel free to open an issue or submit a pull request.
 
 ## To Do
 - [ ] MAX31855 capability (max31856 shortage)
-- [ ] Autotune PID (look for existing pid autotune projects on github)
-- [ ] advertising of project via forums/rdit/utube
+- [ ] Autotune PID (look for existing pid autotune projects)
 
 ## License
 
