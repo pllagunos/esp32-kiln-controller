@@ -1,9 +1,11 @@
 # ESP32 Electric Kiln Controller
 
-![Kiln Controller Demo](assets/imageOfController.png)
-![The Controller Elias and we made](assets/eliasController.jpeg)
+Open-source, DIY controller for electric kilns. Built with an ESP32 microcontroller as brains to provide PID temperature control, a TFT display as an HMI, a web interface for creating and managing firing schedules and real-time data logging capability with InfluxDB and visualization in Grafana.
 
-This project is an open-source, DIY controller for electric kilns. It uses an ESP32 microcontroller to provide PID temperature control, a TFT display as an HMI, a web interface for creating and managing firing schedules and real-time data logging capability with InfluxDB and visualization in Grafana.
+|       ![Kiln Controller Demo](assets/imageOfController.png)       |                         ![Grafana](assets/grafana.jpeg)                            |        ![Configuration web server](assets/imageOfWebServer.jpeg)           |
+|:-----------------------------------------------------------------:|:----------------------------------------------------------------------------------:|:-------------------------------------------------------------------------:|
+| **Control Panel** <br> *(During manual operation with fixed SP)*  |               **Grafana**    <br> *(Real-time visualization of kiln)*              | **Configuration Portal**   <br> *(Web server for main settings)* |
+
 
 ## Features
 
@@ -16,10 +18,10 @@ This project is an open-source, DIY controller for electric kilns. It uses an ES
 * **Simulation Mode:** Test firing programs without actually heating the kiln.
 * **OTA Firmware Updates (untested):** Check for and install firmware updates directly from the web interface. Updates are pulled from GitHub Releases automatically when a new release is published.
 
-
-![Configuration web server](assets/imageOfWebServer.jpeg)
-
 ## Hardware
+
+| ![Elias controller](assets/eliasController.jpeg) | ![fullKiln](assets/electricKiln.jpeg)|
+|:-----------------------------------------------:|:----------------------------------:|
 
 See the Hardware [README](hardware/README.md) for details on how to setup the electrical connections and PCBs.
 
@@ -139,7 +141,6 @@ To set up InfluxDB Cloud and Grafana for visualization:
  - **Bucket name**: The queries reference a bucket named `"Station of Analysis"` — update them to match whatever you named yours.
  - **Measurement name**: If you change the default data point name `"HORNO ELECTRICO"` (`/lib/task/database_task.cpp`) make sure to change this in the grafana data selector.
 
-![grafana](/assets/grafana.jpeg) 
 
 ### Over the air (OTA) Firmware Updates
 
